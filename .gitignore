@@ -1,0 +1,7 @@
+.claude
+.idea
+.promptx
+/client/dist/
+/client/node_modules/
+/service/dist/
+/service/node_modules/

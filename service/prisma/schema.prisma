@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String             @id
+  tokenVersion  Int                @default(0)
+  createdAt     DateTime           @default(now())
+  identities    UserIdentity[]
+  refreshTokens UserRefreshToken[]
+  characters    Character[]
+  conversations Conversation[]
+  messages      Message[]
+  attachments   Attachment[]
+  workflows     Workflow[]
+  knowledgeBases KnowledgeBase[]
+}
+
+model UserIdentity {
+  id             String       @id
+  userId         String
+  type           String
+  identifierHash String
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([type, identifierHash])
+}
+
+model UserRefreshToken {
+  id                  String              @id
+  userId              String
+  tokenHash           String
+  status              String
+  rotatedFromTokenId  String?
+  deviceFingerprint   String?
+  createdAt           DateTime            @default(now())
+  lastUsedAt          DateTime?
+  expiresAt           DateTime
+  user                User                @relation(fields: [userId], references: [id])
+
+  @@index([tokenHash])
+  @@index([userId, status, expiresAt])
+}
+
+model RefreshLock {
+  userId     String   @id
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+}
+
+model Character {
+  id                  String             @id
+  ownerUserId         String
+  name                String
+  avatarAttachmentId  String?
+  bio                 String?
+  visibility          String             @default("private")
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  owner               User               @relation(fields: [ownerUserId], references: [id])
+  versions            CharacterVersion[]
+  conversations       Conversation[]
+
+  @@index([ownerUserId, updatedAt])
+}
+
+model CharacterVersion {
+  id               String                 @id
+  characterId      String
+  version          Int
+  status           String
+  promptConfigJson String
+  createdAt        DateTime               @default(now())
+  character        Character              @relation(fields: [characterId], references: [id])
+  workflowId       String?
+  workflow         Workflow?              @relation(fields: [workflowId], references: [id])
+  knowledgeBaseId  String?
+  knowledgeBase    KnowledgeBase?         @relation(fields: [knowledgeBaseId], references: [id])
+  conversations    Conversation[]
+
+  @@unique([characterId, version])
+  @@index([characterId, status, version])
+}
+
+model Workflow {
+  id                String             @id @default(uuid())
+  name              String
+  description       String?
+  graphData         String             // JSON string for UI nodes/edges
+  published         Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  ownerUserId       String
+  owner             User               @relation(fields: [ownerUserId], references: [id])
+  characterVersions CharacterVersion[]
+
+  @@index([ownerUserId, updatedAt])
+}
+
+model KnowledgeBase {
+  id                String             @id @default(uuid())
+  name              String
+  description       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  ownerUserId       String
+  owner             User               @relation(fields: [ownerUserId], references: [id])
+  documents         Document[]
+  characterVersions CharacterVersion[]
+
+  @@index([ownerUserId, updatedAt])
+}
+
+model Document {
+  id              String        @id @default(uuid())
+  knowledgeBaseId String
+  name            String
+  mimeType        String
+  size            Int
+  storageKey      String
+  status          String        // pending, processing, indexed, failed
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id])
+  chunks          Chunk[]
+
+  @@index([knowledgeBaseId])
+}
+
+model Chunk {
+  id         String   @id @default(uuid())
+  documentId String
+  content    String
+  embedding  String?  // JSON string or base64
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id])
+
+  @@index([documentId])
+}
+
+model Conversation {
+  id                  String               @id
+  ownerUserId         String
+  characterId         String
+  characterVersionId  String
+  title               String?
+  lastMessageAt       DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  owner               User                 @relation(fields: [ownerUserId], references: [id])
+  character           Character            @relation(fields: [characterId], references: [id])
+  characterVersion    CharacterVersion     @relation(fields: [characterVersionId], references: [id])
+  messages            Message[]
+  tasks               GenerationTask[]
+  summary             ConversationSummary?
+
+  @@index([ownerUserId, updatedAt])
+  @@index([ownerUserId, deletedAt])
+}
+
+model Message {
+  id                     String             @id
+  conversationId         String
+  ownerUserId            String
+  role                   String
+  content                String
+  clientMessageId        String?
+  status                 String
+  partial                Boolean            @default(false)
+  supersededByMessageId  String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  conversation           Conversation       @relation(fields: [conversationId], references: [id])
+  owner                  User               @relation(fields: [ownerUserId], references: [id])
+  attachments            MessageAttachment[]
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt, id])
+}
+
+model Attachment {
+  id          String               @id
+  ownerUserId String
+  type        String
+  storageKey  String
+  mime        String
+  size        Int
+  width       Int?
+  height      Int?
+  scanStatus  String
+  createdAt   DateTime             @default(now())
+  owner       User                 @relation(fields: [ownerUserId], references: [id])
+  messages    MessageAttachment[]
+
+  @@index([ownerUserId, createdAt])
+}
+
+model MessageAttachment {
+  messageId     String
+  attachmentId  String
+  message       Message     @relation(fields: [messageId], references: [id])
+  attachment    Attachment  @relation(fields: [attachmentId], references: [id])
+
+  @@id([messageId, attachmentId])
+}
+
+model GenerationTask {
+  id                   String               @id
+  conversationId       String
+  assistantMessageId   String
+  status               String
+  model                String
+  errorCode            String?
+  errorMessage         String?
+  tokenUsagePrompt     Int?
+  tokenUsageCompletion Int?
+  tokenUsageTotal      Int?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  conversation         Conversation         @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model ConversationSummary {
+  id             String        @id
+  conversationId String        @unique
+  content        String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+}
+
+model IdempotencyRecord {
+  key         String   @id
+  ownerUserId String
+  route       String
+  requestHash String
+  responseJson String
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+}
+
+model MagicLinkToken {
+  id          String   @id
+  email       String
+  tokenHash   String
+  purpose     String   @default("login")
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([email, expiresAt])
+  @@index([tokenHash])
+}

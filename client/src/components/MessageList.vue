@@ -1,0 +1,12 @@
+<template>
+  <div class="stack">
+    <MessageItem v-for="item in messages" :key="item.id" :message="item" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import MessageItem from "./MessageItem.vue"
+import type { Message } from "../types"
+
+defineProps<{ messages: Message[] }>()
+</script>
