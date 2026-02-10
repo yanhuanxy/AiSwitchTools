@@ -4,10 +4,12 @@ import express, { Request, Response, NextFunction } from "express";
 import path from "node:path";
 import { AppModule } from "./app.module";
 import { ObservabilityService } from "./modules/observability/observability.service";
+import { JwtExceptionFilter } from "./common/filters/jwt-exception.filter";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix("api");
+  app.useGlobalFilters(new JwtExceptionFilter());
   const observabilityService = app.get(ObservabilityService);
   if (!observabilityService) {
     console.error("ObservabilityService not found!");

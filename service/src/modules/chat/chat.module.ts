@@ -10,8 +10,22 @@ import { ChatProvider } from './chat.provider';
 import { ChatRepository } from './chat.repository';
 import { ChatService } from './chat.service';
 
+import { RagModule } from '../rag/rag.module';
+import { WorkflowEngineModule } from '../workflow-engine/workflow-engine.module';
+import { LlmModule } from '../llm/llm.module';
+
 @Module({
-  imports: [PrismaModule, AuthModule, AttachmentsModule, SummariesModule, SafetyModule, TasksModule],
+  imports: [
+    PrismaModule, 
+    AuthModule, 
+    AttachmentsModule, 
+    SummariesModule, 
+    SafetyModule, 
+    TasksModule,
+    RagModule,
+    WorkflowEngineModule,
+    LlmModule
+  ],
   controllers: [ChatController],
   providers: [ChatService, ChatRepository, ChatProvider],
   exports: [ChatService, ChatRepository, ChatProvider],

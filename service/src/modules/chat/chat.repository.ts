@@ -8,7 +8,11 @@ type ConversationContext = {
   characterId: string;
   characterVersionId: string;
   character: { name: string };
-  characterVersion: { promptConfigJson: string };
+  characterVersion: { 
+    promptConfigJson: string;
+    workflowId: string | null;
+    knowledgeBaseId: string | null;
+  };
 };
 
 type MessageAttachmentRecord = {
@@ -46,7 +50,13 @@ export class ChatRepository {
       },
       include: {
         character: { select: { name: true } },
-        characterVersion: { select: { promptConfigJson: true } },
+        characterVersion: { 
+          select: { 
+            promptConfigJson: true,
+            workflowId: true,
+            knowledgeBaseId: true
+          } 
+        },
       },
     });
   }

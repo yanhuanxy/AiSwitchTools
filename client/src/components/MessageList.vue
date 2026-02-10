@@ -1,5 +1,5 @@
 <template>
-  <div class="stack">
+  <div class="space-y-6">
     <MessageItem v-for="item in messages" :key="item.id" :message="item" />
   </div>
 </template>

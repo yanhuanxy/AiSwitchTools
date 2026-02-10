@@ -22,6 +22,7 @@ type CharacterRecord = {
   visibility: string;
   createdAt: Date;
   updatedAt: Date;
+  favorites?: { userId: string }[];
 };
 
 @Injectable()
@@ -31,6 +32,15 @@ export class CharactersService {
     @Inject(MessagesProvider) private readonly messagesProvider: MessagesProvider,
     @Inject(AttachmentsService) private readonly attachmentsService: AttachmentsService,
   ) {}
+
+  async toggleFavorite(request: Request, id: string) {
+    const userId = this.getOwnerUserId(request);
+    const isFavorite = await this.charactersRepository.toggleFavorite({
+      userId,
+      characterId: id,
+    });
+    return { isFavorite };
+  }
 
   async createCharacter(request: Request, body: CreateCharacterDto) {
     const ownerUserId = this.getOwnerUserId(request);
@@ -80,7 +90,7 @@ export class CharactersService {
 
   async listCharacters(
     request: Request,
-    query: { limit?: string; cursor?: string },
+    query: { limit?: string; cursor?: string; search?: string; favorites?: string },
   ) {
     const ownerUserId = this.getOwnerUserId(request);
     const limit = this.parseLimit(query.limit);
@@ -89,6 +99,8 @@ export class CharactersService {
       ownerUserId,
       limit,
       cursor,
+      search: query.search,
+      favorites: query.favorites === 'true',
     });
     const hasMore = items.length > limit;
     const slice = hasMore ? items.slice(0, limit) : items;
@@ -102,6 +114,7 @@ export class CharactersService {
         bio: item.bio ?? undefined,
         avatarAttachmentId: item.avatarAttachmentId ?? undefined,
         visibility: 'private',
+        isFavorite: item.favorites && item.favorites.length > 0,
         createdAt: item.createdAt.toISOString(),
         updatedAt: item.updatedAt.toISOString(),
       })),

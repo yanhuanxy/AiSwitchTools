@@ -7,7 +7,8 @@ import {
   fetchRoleVersions,
   fetchRoles,
   publishRoleVersion,
-  updateRoleVersion
+  updateRoleVersion,
+  toggleRoleFavorite
 } from "../services/roles"
 
 export const useRoleStore = defineStore("roles", {
@@ -17,10 +18,21 @@ export const useRoleStore = defineStore("roles", {
     activeVersions: [] as CharacterVersion[]
   }),
   actions: {
-    async loadRoles() {
-      const response = await fetchRoles()
+    async loadRoles(query?: { search?: string; favorites?: boolean }) {
+      const response = await fetchRoles(query)
       const list = Array.isArray(response) ? response : (response as any)?.items || []
       this.roles = list.filter((item: any) => item && item.id)
+    },
+    async toggleFavorite(roleId: string) {
+      const { isFavorite } = await toggleRoleFavorite(roleId)
+      // Update local state
+      const role = this.roles.find((r) => r.id === roleId)
+      if (role) {
+        role.isFavorite = isFavorite
+        // If viewing favorites, remove it from list if unfavorited
+        // Note: We might need to pass current view context, but simplest is to just update prop
+      }
+      return isFavorite
     },
     async loadRoleDetail(id: string) {
       this.activeRole = await fetchRoleDetail(id)

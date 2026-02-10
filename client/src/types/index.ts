@@ -4,6 +4,7 @@ export type Character = {
   bio?: string
   avatarAttachmentId?: string
   visibility: "private"
+  isFavorite?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -31,6 +32,7 @@ export type CharacterVersion = {
 export type ConversationListItem = {
   conversationId: string
   title: string
+  isPinned: boolean
   updatedAt: string
   lastMessagePreview: string
   characterName?: string

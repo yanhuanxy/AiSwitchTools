@@ -16,6 +16,8 @@ import { ObservabilityModule } from "./modules/observability/observability.modul
 import { LlmModule } from "./modules/llm/llm.module";
 import { WorkflowModule } from "./modules/workflow/workflow.module";
 import { KnowledgeBaseModule } from "./modules/knowledge-base/knowledge-base.module";
+import { RagModule } from "./modules/rag/rag.module";
+import { WorkflowEngineModule } from "./modules/workflow-engine/workflow-engine.module";
 
 @Module({
   imports: [
@@ -35,7 +37,9 @@ import { KnowledgeBaseModule } from "./modules/knowledge-base/knowledge-base.mod
     SafetyModule,
     ObservabilityModule,
     WorkflowModule,
-    KnowledgeBaseModule
+    KnowledgeBaseModule,
+    RagModule,
+    WorkflowEngineModule
   ]
 })
 export class AppModule {}

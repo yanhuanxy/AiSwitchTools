@@ -1,82 +1,64 @@
-* {
-  box-sizing: border-box;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --el-color-primary: #0066FF;
+    --el-color-primary-light-9: #F0F6FF;
+    --el-border-radius-base: 8px;
+    --el-font-size-base: 14px;
+    --el-font-family: "Source Han Sans", "Noto Sans SC", sans-serif;
+  }
+  
+  html {
+    font-family: "Source Han Sans", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply text-gray-text bg-gray-50;
+    margin: 0;
+  }
 }
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background: #f7f7f7;
-  color: #222;
+@layer components {
+  /* Coze Style Card */
+  .coze-card {
+    @apply bg-white border border-gray-border rounded-coze p-4 transition-shadow duration-200;
+  }
+  .coze-card:hover {
+    @apply shadow-card-hover;
+  }
+
+  /* Coze Style Input */
+  .coze-input {
+    @apply h-10 px-3 border border-gray-border rounded-coze outline-none text-sm transition-colors duration-200;
+  }
+  .coze-input:focus {
+    @apply border-primary border-2 -m-[1px]; /* Compensate for border width change to avoid layout shift, or just use ring */
+  }
+  .coze-input-error {
+    @apply border-danger border-2;
+  }
+
+  /* Coze Style Button */
+  .coze-btn {
+    @apply h-8 px-4 rounded-coze text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2;
+  }
+  .coze-btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover active:bg-primary-active;
+  }
+  .coze-btn-secondary {
+    @apply bg-primary-light text-primary hover:bg-[#E1EBFF];
+  }
+  .coze-btn-lg { @apply h-10 px-5 text-base; }
+  .coze-btn-xl { @apply h-12 px-6 text-lg; }
 }
 
+/* Override Element Plus Variables where possible */
 :root {
-  --el-color-primary: #2d6cdf;
+  --el-color-primary: #0066FF;
+  --el-color-danger: #FF4D4F;
   --el-border-radius-base: 8px;
-  --el-font-size-base: 14px;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.app-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
-  background: #fff;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.app-menu {
-  flex: 1;
-  border-bottom: none;
-  background: transparent;
-}
-
-.app-main {
-  padding: 20px;
-}
-
-.card {
-  background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.stack {
-  display: grid;
-  gap: 12px;
-}
-
-.row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.badge {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #f0f4ff;
-  color: #2d6cdf;
-  font-size: 12px;
-}
-
-.list {
-  display: grid;
-  gap: 10px;
-}
-
-.muted {
-  color: #666;
-  font-size: 13px;
 }

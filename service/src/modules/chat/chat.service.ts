@@ -16,6 +16,8 @@ import { SummariesService } from '../summaries/summaries.service';
 import { SafetyService } from '../safety/safety.service';
 import { LlmService, ChatMessage } from '../llm/llm.service';
 import { TasksRepository } from '../tasks/tasks.repository';
+import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
+import { RagService } from '../rag/rag.service';
 
 type PromptConfig = {
   backgroundStory?: string;
@@ -35,6 +37,8 @@ export class ChatService {
     @Inject(SafetyService) private readonly safetyService: SafetyService,
     @Inject(LlmService) private readonly llmService: LlmService,
     @Inject(TasksRepository) private readonly tasksRepository: TasksRepository,
+    private readonly workflowEngine: WorkflowEngineService,
+    private readonly ragService: RagService,
   ) {}
 
   async createTask(ownerUserId: string, dto: CreateChatTaskDto): Promise<ChatTaskResult> {
@@ -369,17 +373,66 @@ export class ChatService {
         return;
       }
 
-      const summaryContent = await this.getSummaryContent(task.conversationId, ownerUserId);
       const recentMessages = await this.chatRepository.findRecentMessages({
         conversationId: task.conversationId,
         ownerUserId,
         limit: 50,
       });
 
+      // 1. Check for Workflow Binding
+      if (conversation.characterVersion.workflowId) {
+        try {
+          await this.tasksRepository.updateTaskStatus({ taskId, status: 'running' });
+          const userMessage = recentMessages.find((m) => m.role === 'user');
+          const input = userMessage?.content || '';
+
+          const output = await this.workflowEngine.executeWorkflow(
+            conversation.characterVersion.workflowId,
+            {
+              userId: ownerUserId,
+              conversationId: task.conversationId,
+              input,
+              history: recentMessages,
+            }
+          );
+
+          await this.tasksRepository.updateMessageContent(task.assistantMessageId, output);
+          await this.tasksRepository.updateMessageStatus({
+            messageId: task.assistantMessageId,
+            status: 'completed',
+            partial: false,
+          });
+          await this.tasksRepository.updateTaskStatus({
+            taskId,
+            status: 'completed',
+            tokenUsageCompletion: 0, 
+            tokenUsageTotal: 0,
+          });
+          return;
+        } catch (error) {
+           console.error('Workflow execution failed', error);
+           throw error;
+        }
+      }
+
+      const summaryContent = await this.getSummaryContent(task.conversationId, ownerUserId);
       const messagesForLlm: ChatMessage[] = [];
       const systemPrompt = this.chatProvider.getSystemPrompt();
       if (systemPrompt) {
         messagesForLlm.push({ role: 'system', content: systemPrompt });
+      }
+
+      // 2. Check for Knowledge Base Binding (RAG)
+      if (conversation.characterVersion.knowledgeBaseId) {
+        const userMessage = recentMessages.find((m) => m.role === 'user');
+        const query = userMessage?.content || '';
+        const ragContext = await this.ragService.retrieve(conversation.characterVersion.knowledgeBaseId, query);
+        if (ragContext.length > 0) {
+          messagesForLlm.push({ 
+            role: 'system', 
+            content: `Relevant Context from Knowledge Base:\n${ragContext.join('\n---\n')}` 
+          });
+        }
       }
 
       const config = this.parsePromptConfig(conversation.characterVersion.promptConfigJson);

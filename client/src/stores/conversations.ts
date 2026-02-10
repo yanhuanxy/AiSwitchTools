@@ -3,6 +3,10 @@ import type { ApiListResponse, ConversationListItem, Message } from "../types"
 import {
   createConversation,
   deleteConversation,
+  batchDeleteConversations,
+  restoreConversation,
+  batchRestoreConversations,
+  toggleConversationPin,
   fetchConversations,
   fetchMessages,
   renameConversation
@@ -60,6 +64,35 @@ export const useConversationStore = defineStore("conversations", {
     async deleteConversation(conversationId: string) {
       await deleteConversation(conversationId)
       this.items = this.items.filter((item) => item.conversationId !== conversationId)
+    },
+    async batchDelete(ids: string[]) {
+      await batchDeleteConversations(ids)
+      this.items = this.items.filter((item) => !ids.includes(item.conversationId))
+    },
+    async restore(ids: string[]) {
+      if (ids.length === 1) {
+        await restoreConversation(ids[0])
+      } else {
+        await batchRestoreConversations(ids)
+      }
+      // Refresh list to get restored items back
+      await this.loadConversations(null)
+    },
+    async togglePin(conversationId: string, isPinned: boolean) {
+      await toggleConversationPin(conversationId, isPinned)
+      // Optimistic update
+      this.items = this.items.map((item) =>
+        item.conversationId === conversationId ? { ...item, isPinned } : item
+      )
+      // Re-sort: Pinned first, then UpdatedAt
+      this.items.sort((a, b) => {
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      })
+      
+      // If we are strictly relying on backend sort for cursor pagination, optimistic sort is fine for current page,
+      // but reloading is safer to ensure consistency with backend cursor.
+      // However, for user experience, immediate sort is better.
     }
   }
 })

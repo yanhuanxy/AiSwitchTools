@@ -28,6 +28,8 @@ export class CharactersRepository {
     ownerUserId: string;
     limit: number;
     cursor?: { updatedAt: Date; id: string };
+    search?: string;
+    favorites?: boolean;
   }) {
     const cursorCondition = params.cursor
       ? {
@@ -40,14 +42,67 @@ export class CharactersRepository {
           ],
         }
       : undefined;
+
+    const where: any = {
+      ...(cursorCondition ? { AND: cursorCondition } : {}),
+    };
+
+    if (params.favorites) {
+      where.favorites = {
+        some: {
+          userId: params.ownerUserId,
+        },
+      };
+    } else {
+      where.ownerUserId = params.ownerUserId;
+    }
+
+    if (params.search) {
+      where.name = { contains: params.search };
+    }
+
     return this.prisma.character.findMany({
-      where: {
-        ownerUserId: params.ownerUserId,
-        ...(cursorCondition ? { AND: cursorCondition } : {}),
+      where,
+      include: {
+        favorites: {
+          where: { userId: params.ownerUserId },
+          select: { userId: true },
+        },
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       take: params.limit + 1,
     });
+  }
+
+  async toggleFavorite(params: { userId: string; characterId: string }) {
+    const existing = await this.prisma.characterFavorite.findUnique({
+      where: {
+        userId_characterId: {
+          userId: params.userId,
+          characterId: params.characterId,
+        },
+      },
+    });
+
+    if (existing) {
+      await this.prisma.characterFavorite.delete({
+        where: {
+          userId_characterId: {
+            userId: params.userId,
+            characterId: params.characterId,
+          },
+        },
+      });
+      return false;
+    } else {
+      await this.prisma.characterFavorite.create({
+        data: {
+          userId: params.userId,
+          characterId: params.characterId,
+        },
+      });
+      return true;
+    }
   }
 
   async findCharacterById(params: { ownerUserId: string; id: string }) {

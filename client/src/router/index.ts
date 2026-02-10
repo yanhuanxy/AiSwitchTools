@@ -5,9 +5,9 @@ const router = createRouter({
   routes: [
     { path: "/", redirect: "/roles" },
     { path: "/roles", component: () => import("../pages/RolesPage.vue") },
-    { path: "/roles/create", component: () => import("../pages/RoleCreatePage.vue") },
-    { path: "/roles/:id", component: () => import("../pages/RoleDetailPage.vue") },
-    { path: "/roles/:id/edit", component: () => import("../pages/RoleEditPage.vue") },
+    { path: "/roles/create", component: () => import("../pages/role/RoleCreatePage.vue") },
+    { path: "/roles/:id", component: () => import("../pages/role/RoleDetailPage.vue") },
+    { path: "/roles/:id/edit", component: () => import("../pages/role/RoleEditPage.vue") },
     { path: "/chat/:conversationId", component: () => import("../pages/ChatPage.vue") },
     { path: "/history", component: () => import("../pages/HistoryPage.vue") },
     { path: "/auth/bind", component: () => import("../pages/AuthBindPage.vue") },

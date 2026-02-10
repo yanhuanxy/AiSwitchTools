@@ -2,14 +2,14 @@ import { IsString, IsOptional, IsBoolean } from 'class-validator';
 
 export class CreateWorkflowDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsString()
   @IsOptional()
   description?: string;
 
   @IsString()
-  graphData: string;
+  graphData!: string;
 
   @IsBoolean()
   @IsOptional()

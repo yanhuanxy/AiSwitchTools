@@ -35,11 +35,22 @@ export class CharactersController {
     @Req() request: Request,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
+    @Query('search') search?: string,
+    @Query('favorites') favorites?: string,
   ) {
     const result = await this.charactersService.listCharacters(request, {
       limit,
       cursor,
+      search,
+      favorites,
     });
+    const traceId = request.headers['x-trace-id'] as string;
+    return { ...result, traceId };
+  }
+
+  @Post(':id/favorite')
+  async toggleFavorite(@Req() request: Request, @Param('id') id: string) {
+    const result = await this.charactersService.toggleFavorite(request, id);
     const traceId = request.headers['x-trace-id'] as string;
     return { ...result, traceId };
   }

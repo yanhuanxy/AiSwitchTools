@@ -8,6 +8,8 @@ export const apiClient = axios.create({
   timeout: 30000
 })
 
+export const api = apiClient
+
 let getAuthStore: (() => {
   accessToken: string | null
   refreshAccessToken: () => Promise<void>

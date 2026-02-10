@@ -1,8 +1,18 @@
 import { apiClient } from "./api"
 import type { Character, CharacterVersion } from "../types"
 
-export const fetchRoles = async () => {
-  const { data } = await apiClient.get<Character[]>("/characters")
+export const fetchRoles = async (query?: { search?: string; favorites?: boolean }) => {
+  const params = new URLSearchParams()
+  if (query?.search) params.append("search", query.search)
+  if (query?.favorites) params.append("favorites", "true")
+  const { data } = await apiClient.get<Character[]>(`/characters?${params.toString()}`)
+  return data
+}
+
+export const toggleRoleFavorite = async (roleId: string) => {
+  const { data } = await apiClient.post<{ isFavorite: boolean }>(
+    `/characters/${roleId}/favorite`
+  )
   return data
 }
 

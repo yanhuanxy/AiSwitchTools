@@ -45,11 +45,11 @@ export const resolveError = (error: any, fallback?: string) => {
   return { code, traceId, message }
 }
 
-export const notifyError = (message: string) => {
+export const notifyError = (message: string, type: "success" | "warning" | "info" | "error" = "error") => {
   if (!message) return
   ElMessage({
     message,
-    type: "error",
+    type,
     duration: 3500,
     showClose: true
   })

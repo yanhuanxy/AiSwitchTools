@@ -6,9 +6,10 @@ import { SummariesRepository } from './summaries.repository';
 import { SummariesProvider } from './summaries.provider';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { LlmModule } from '../llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, AuthModule],
+  imports: [PrismaModule, ConfigModule, AuthModule, LlmModule],
   controllers: [SummariesController],
   providers: [
     SummariesService,

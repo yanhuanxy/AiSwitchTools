@@ -1,13 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 
 @Injectable()
 export class WorkflowService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   create(userId: string, createWorkflowDto: CreateWorkflowDto) {
+    this.ensurePrisma();
     return this.prisma.workflow.create({
       data: {
         ...createWorkflowDto,
@@ -17,6 +18,7 @@ export class WorkflowService {
   }
 
   findAll(userId: string) {
+    this.ensurePrisma();
     return this.prisma.workflow.findMany({
       where: { ownerUserId: userId },
       orderBy: { updatedAt: 'desc' },
@@ -24,12 +26,14 @@ export class WorkflowService {
   }
 
   findOne(id: string, userId: string) {
+    this.ensurePrisma();
     return this.prisma.workflow.findFirst({
       where: { id, ownerUserId: userId },
     });
   }
 
   update(id: string, userId: string, updateWorkflowDto: UpdateWorkflowDto) {
+    this.ensurePrisma();
     return this.prisma.workflow.updateMany({
       where: { id, ownerUserId: userId },
       data: updateWorkflowDto,
@@ -37,8 +41,18 @@ export class WorkflowService {
   }
 
   remove(id: string, userId: string) {
+    this.ensurePrisma();
     return this.prisma.workflow.deleteMany({
       where: { id, ownerUserId: userId },
     });
+  }
+
+  private ensurePrisma() {
+    if (!this.prisma) {
+      throw new Error('PrismaService is not initialized in WorkflowService');
+    }
+    if (!this.prisma.workflow) {
+      throw new Error('PrismaService does not have workflow model. Please run "prisma generate".');
+    }
   }
 }

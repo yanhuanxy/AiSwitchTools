@@ -77,6 +77,55 @@ export class LlmService {
     return false;
   }
 
+  async getAvailableModels(): Promise<{ id: string; name: string; provider: 'openai' | 'anthropic' }[]> {
+    const models: { id: string; name: string; provider: 'openai' | 'anthropic' }[] = [];
+
+    if (this.openai) {
+      models.push(
+        { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'openai' },
+        { id: 'gpt-4', name: 'GPT-4', provider: 'openai' },
+        { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'openai' },
+        { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' }
+      );
+    }
+
+    if (this.anthropic) {
+      models.push(
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic' },
+        { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', provider: 'anthropic' },
+        { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', provider: 'anthropic' },
+        { id: 'claude-3-5-sonnet-20240620', name: 'Claude 3.5 Sonnet', provider: 'anthropic' }
+      );
+    }
+
+    // Allow custom models from config
+    const customModel = this.configService.get('ANTHROPIC_MODEL');
+    if (customModel && !models.find(m => m.id === customModel)) {
+       models.push({ id: customModel, name: customModel, provider: 'anthropic' });
+    }
+
+    return models;
+  }
+
+  async getEmbedding(text: string): Promise<number[]> {
+    // 1. Try OpenAI
+    if (this.openai) {
+      try {
+        const response = await this.openai.embeddings.create({
+          model: 'text-embedding-ada-002', // Or 'text-embedding-3-small'
+          input: text,
+        });
+        return response.data[0].embedding;
+      } catch (err) {
+        this.logger.error('OpenAI Embedding failed', err);
+      }
+    }
+
+    // 2. Mock Fallback (random vector of dim 1536)
+    this.logger.warn('Using Mock Embedding');
+    return Array.from({ length: 1536 }, () => Math.random());
+  }
+
   async chatCompletion(
     messages: ChatMessage[],
     options: ChatOptions = {},

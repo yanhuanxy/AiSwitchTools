@@ -42,3 +42,19 @@ export const deleteConversation = async (conversationId: string) => {
   const { data } = await apiClient.delete(`/conversations/${conversationId}`)
   return data
 }
+
+export const batchDeleteConversations = async (ids: string[]) => {
+  await apiClient.post("/conversations/batch-delete", { ids })
+}
+
+export const restoreConversation = async (id: string) => {
+  await apiClient.post(`/conversations/${id}/restore`)
+}
+
+export const batchRestoreConversations = async (ids: string[]) => {
+  await apiClient.post("/conversations/batch-restore", { ids })
+}
+
+export const toggleConversationPin = async (conversationId: string, isPinned: boolean) => {
+  await apiClient.post(`/conversations/${conversationId}/pin`, { isPinned })
+}

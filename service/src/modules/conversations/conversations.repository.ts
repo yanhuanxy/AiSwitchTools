@@ -69,12 +69,39 @@ export class ConversationsRepository {
       deletedAt: null,
     };
 
-    const decodedCursor = cursor ? this.messagesProvider.decodeCursor(cursor) : undefined;
+    let decodedCursor: { createdAt: Date; id: string; isPinned: boolean } | undefined;
+    if (cursor) {
+      try {
+        const decoded = Buffer.from(cursor, 'base64').toString('utf8');
+        const payload = JSON.parse(decoded);
+        decodedCursor = {
+          createdAt: new Date(payload.createdAt),
+          id: payload.id,
+          isPinned: payload.isPinned ?? false,
+        };
+      } catch (e) {
+        // Fallback to old cursor format if needed or ignore
+      }
+    }
+
+    // Sort order: isPinned DESC (true first), updatedAt DESC, id DESC
+    // Cursor logic for (isPinned, updatedAt, id) < (c.isPinned, c.updatedAt, c.id)
+    // Expanded:
+    // (isPinned < c.isPinned) -- false < true
+    // OR (isPinned = c.isPinned AND updatedAt < c.updatedAt)
+    // OR (isPinned = c.isPinned AND updatedAt = c.updatedAt AND id < c.id)
+
     const cursorCondition = decodedCursor
       ? {
           OR: [
-            { updatedAt: { lt: decodedCursor.createdAt } },
+            // If cursor was pinned (true), we accept unpinned (false)
+            ...(decodedCursor.isPinned ? [{ isPinned: false }] : []),
             {
+              isPinned: decodedCursor.isPinned,
+              updatedAt: { lt: decodedCursor.createdAt },
+            },
+            {
+              isPinned: decodedCursor.isPinned,
               updatedAt: decodedCursor.createdAt,
               id: { lt: decodedCursor.id },
             },
@@ -88,6 +115,7 @@ export class ConversationsRepository {
         ...(cursorCondition ? { AND: cursorCondition } : {}),
       },
       orderBy: [
+        { isPinned: 'desc' },
         { updatedAt: 'desc' },
         { id: 'desc' },
       ],
@@ -108,17 +136,40 @@ export class ConversationsRepository {
 
     const hasMore = conversations.length > limit;
     const items = hasMore ? conversations.slice(0, limit) : conversations;
-    const nextCursor = hasMore
-      ? this.messagesProvider.encodeCursor({
-          createdAt: items[items.length - 1].updatedAt,
-          id: items[items.length - 1].id,
-        })
-      : undefined;
+    
+    let nextCursor: string | undefined;
+    if (hasMore) {
+      const lastItem = items[items.length - 1];
+      const payload = JSON.stringify({
+        createdAt: lastItem.updatedAt.toISOString(),
+        id: lastItem.id,
+        isPinned: (lastItem as any).isPinned, // Type cast if needed until entity updated
+      });
+      nextCursor = Buffer.from(payload, 'utf8').toString('base64');
+    }
 
     return {
       items,
       nextCursor,
     };
+  }
+
+  async togglePin(id: string, ownerUserId: string, isPinned: boolean): Promise<void> {
+    await this.prisma.conversation.update({
+      where: {
+        id,
+        ownerUserId,
+        deletedAt: null,
+      },
+      data: {
+        isPinned,
+        updatedAt: new Date(), // Optional: Should pinning update timestamp? Usually yes for sync but maybe no for sorting if we sort by pinned first anyway. 
+        // Actually if we sort by Pinned then UpdatedAt, updating UpdatedAt ensures it stays at top of Pinned section or top of Unpinned section.
+        // User requirement: "Pinned items move to top".
+        // If multiple pinned items exist, their relative order is updatedAt.
+        // So updating updatedAt makes it the "newest pinned item". This is good behavior.
+      },
+    });
   }
 
   async updateTitle(id: string, ownerUserId: string, title: string): Promise<ConversationEntity> {
@@ -156,6 +207,48 @@ export class ConversationsRepository {
       },
       data: {
         deletedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  async restore(id: string, ownerUserId: string): Promise<void> {
+    await this.prisma.conversation.update({
+      where: {
+        id,
+        ownerUserId,
+        deletedAt: { not: null },
+      },
+      data: {
+        deletedAt: null,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  async batchSoftDelete(ids: string[], ownerUserId: string): Promise<void> {
+    await this.prisma.conversation.updateMany({
+      where: {
+        id: { in: ids },
+        ownerUserId,
+        deletedAt: null,
+      },
+      data: {
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  async batchRestore(ids: string[], ownerUserId: string): Promise<void> {
+    await this.prisma.conversation.updateMany({
+      where: {
+        id: { in: ids },
+        ownerUserId,
+        deletedAt: { not: null },
+      },
+      data: {
+        deletedAt: null,
         updatedAt: new Date(),
       },
     });

@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { ConversationsService } from './conversations.service';
-import { CreateConversationDto, UpdateConversationDto } from './dto';
+import { CreateConversationDto, UpdateConversationDto, BatchOperationDto } from './dto';
 import { MessagesService } from '../messages/messages.service';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -72,6 +72,7 @@ export class ConversationsController {
       items: result.items.map(item => ({
         conversationId: item.conversationId,
         title: item.title,
+        isPinned: item.isPinned,
         updatedAt: item.updatedAt,
         lastMessagePreview: item.lastMessagePreview,
         lastMessageAt: item.lastMessageAt,
@@ -107,6 +108,21 @@ export class ConversationsController {
   }
 
   /**
+   * 置顶/取消置顶会话
+   * POST /api/conversations/:id/pin
+   */
+  @Post(':id/pin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async togglePin(
+    @Param('id') id: string,
+    @Body('isPinned') isPinned: boolean,
+    @Req() req: Request,
+  ) {
+    const ownerUserId = (req as any).user.id;
+    await this.conversationsService.togglePin(id, ownerUserId, isPinned);
+  }
+
+  /**
    * 更新会话标题
    * PATCH /api/conversations/:id
    */
@@ -139,6 +155,48 @@ export class ConversationsController {
   ) {
     const ownerUserId = (req as any).user.id;
     await this.conversationsService.remove(id, ownerUserId);
+  }
+
+  /**
+   * 批量删除会话
+   * POST /api/conversations/batch-delete
+   */
+  @Post('batch-delete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async batchRemove(
+    @Body() dto: BatchOperationDto,
+    @Req() req: Request,
+  ) {
+    const ownerUserId = (req as any).user.id;
+    await this.conversationsService.batchRemove(dto.ids, ownerUserId);
+  }
+
+  /**
+   * 恢复会话
+   * POST /api/conversations/:id/restore
+   */
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async restore(
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const ownerUserId = (req as any).user.id;
+    await this.conversationsService.restore(id, ownerUserId);
+  }
+
+  /**
+   * 批量恢复会话
+   * POST /api/conversations/batch-restore
+   */
+  @Post('batch-restore')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async batchRestore(
+    @Body() dto: BatchOperationDto,
+    @Req() req: Request,
+  ) {
+    const ownerUserId = (req as any).user.id;
+    await this.conversationsService.batchRestore(dto.ids, ownerUserId);
   }
 
   /**

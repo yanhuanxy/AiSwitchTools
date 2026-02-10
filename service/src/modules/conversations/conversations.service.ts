@@ -9,6 +9,7 @@ export interface ConversationResponse {
   conversationId: string;
   characterVersionId: string;
   title?: string | null;
+  isPinned: boolean;
   updatedAt: Date;
   lastMessagePreview?: string;
   lastMessageAt?: Date | null;
@@ -83,6 +84,7 @@ export class ConversationsService {
           conversationId: conversation.id,
           characterVersionId: conversation.characterVersionId,
           title: conversation.title,
+          isPinned: (conversation as any).isPinned,
           updatedAt: conversation.updatedAt,
           lastMessagePreview,
           lastMessageAt: conversation.lastMessageAt,
@@ -127,6 +129,14 @@ export class ConversationsService {
     };
   }
 
+  async togglePin(id: string, ownerUserId: string, isPinned: boolean): Promise<void> {
+    const exists = await this.conversationsRepository.exists(id, ownerUserId);
+    if (!exists) {
+      throw new NotFoundException(`Conversation ${id} not found`);
+    }
+    await this.conversationsRepository.togglePin(id, ownerUserId, isPinned);
+  }
+
   async remove(id: string, ownerUserId: string): Promise<void> {
     // 验证会话存在且属于当前用户
     const exists = await this.conversationsRepository.exists(id, ownerUserId);
@@ -135,6 +145,22 @@ export class ConversationsService {
     }
 
     await this.conversationsRepository.softDelete(id, ownerUserId);
+  }
+
+  async restore(id: string, ownerUserId: string): Promise<void> {
+    // We cannot check exists() because it filters out deleted items
+    // So we just try to restore
+    await this.conversationsRepository.restore(id, ownerUserId);
+  }
+
+  async batchRemove(ids: string[], ownerUserId: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.conversationsRepository.batchSoftDelete(ids, ownerUserId);
+  }
+
+  async batchRestore(ids: string[], ownerUserId: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.conversationsRepository.batchRestore(ids, ownerUserId);
   }
 
   async updateLastMessageAt(conversationId: string, ownerUserId: string): Promise<void> {

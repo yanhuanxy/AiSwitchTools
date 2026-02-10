@@ -1,13 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateKnowledgeBaseDto } from './dto/create-knowledge-base.dto';
 import { UpdateKnowledgeBaseDto } from './dto/update-knowledge-base.dto';
 
 @Injectable()
 export class KnowledgeBaseService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private prisma: PrismaService) {}
 
   create(userId: string, createKnowledgeBaseDto: CreateKnowledgeBaseDto) {
+    this.ensurePrisma();
     return this.prisma.knowledgeBase.create({
       data: {
         ...createKnowledgeBaseDto,
@@ -17,6 +18,7 @@ export class KnowledgeBaseService {
   }
 
   findAll(userId: string) {
+    this.ensurePrisma();
     return this.prisma.knowledgeBase.findMany({
       where: { ownerUserId: userId },
       orderBy: { updatedAt: 'desc' },
@@ -27,6 +29,7 @@ export class KnowledgeBaseService {
   }
 
   findOne(id: string, userId: string) {
+    this.ensurePrisma();
     return this.prisma.knowledgeBase.findFirst({
       where: { id, ownerUserId: userId },
       include: {
@@ -36,6 +39,7 @@ export class KnowledgeBaseService {
   }
 
   update(id: string, userId: string, updateKnowledgeBaseDto: UpdateKnowledgeBaseDto) {
+    this.ensurePrisma();
     return this.prisma.knowledgeBase.updateMany({
       where: { id, ownerUserId: userId },
       data: updateKnowledgeBaseDto,
@@ -43,8 +47,18 @@ export class KnowledgeBaseService {
   }
 
   remove(id: string, userId: string) {
+    this.ensurePrisma();
     return this.prisma.knowledgeBase.deleteMany({
       where: { id, ownerUserId: userId },
     });
+  }
+
+  private ensurePrisma() {
+    if (!this.prisma) {
+      throw new Error('PrismaService is not initialized in KnowledgeBaseService');
+    }
+    if (!this.prisma.knowledgeBase) {
+      throw new Error('PrismaService does not have knowledgeBase model. Please run "prisma generate".');
+    }
   }
 }

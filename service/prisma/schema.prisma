@@ -19,6 +19,7 @@ model User {
   attachments   Attachment[]
   workflows     Workflow[]
   knowledgeBases KnowledgeBase[]
+  favorites     CharacterFavorite[]
 }
 
 model UserIdentity {
@@ -66,8 +67,20 @@ model Character {
   owner               User               @relation(fields: [ownerUserId], references: [id])
   versions            CharacterVersion[]
   conversations       Conversation[]
+  favorites           CharacterFavorite[]
 
   @@index([ownerUserId, updatedAt])
+}
+
+model CharacterFavorite {
+  userId      String
+  characterId String
+  createdAt   DateTime @default(now())
+  user        User      @relation(fields: [userId], references: [id])
+  character   Character @relation(fields: [characterId], references: [id])
+
+  @@id([userId, characterId])
+  @@index([userId])
 }
 
 model CharacterVersion {
@@ -150,6 +163,7 @@ model Conversation {
   characterId         String
   characterVersionId  String
   title               String?
+  isPinned            Boolean              @default(false)
   lastMessageAt       DateTime?
   deletedAt           DateTime?
   createdAt           DateTime             @default(now())

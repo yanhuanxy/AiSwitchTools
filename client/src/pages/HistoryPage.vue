@@ -1,7 +1,18 @@
 <template>
   <div class="stack">
     <el-card class="stack">
-      <strong>会话历史</strong>
+      <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <strong>会话历史</strong>
+        <div v-if="conversations.length > 0">
+           <el-button v-if="!isSelectionMode" size="small" @click="toggleSelectionMode">批量管理</el-button>
+           <template v-else>
+             <el-button size="small" type="danger" :disabled="selectedIds.length === 0" @click="batchDelete">
+               删除({{ selectedIds.length }})
+             </el-button>
+             <el-button size="small" @click="toggleSelectionMode">取消</el-button>
+           </template>
+        </div>
+      </div>
       <div v-if="loading" class="list">
         <el-skeleton v-for="n in 3" :key="n" :rows="2" animated />
       </div>
@@ -14,15 +25,25 @@
       </div>
       <div v-else class="list">
         <el-card v-for="item in conversations" :key="item.conversationId" class="stack">
-          <div class="row">
-            <strong>{{ item.title }}</strong>
-            <span class="muted">{{ item.updatedAt }}</span>
-          </div>
-          <div class="muted">{{ item.lastMessagePreview }}</div>
-          <div class="row">
-            <el-button @click="openChat(item.conversationId)">继续对话</el-button>
-            <el-button @click="rename(item)">重命名</el-button>
-            <el-button type="danger" @click="remove(item.conversationId)">删除</el-button>
+          <div style="display: flex; gap: 12px; align-items: flex-start;">
+            <div v-if="isSelectionMode" style="padding-top: 4px;">
+              <el-checkbox 
+                :model-value="selectedIds.includes(item.conversationId)"
+                @change="(val) => toggleSelect(item.conversationId, val)"
+              />
+            </div>
+            <div style="flex: 1; min-width: 0;">
+              <div class="row">
+                <strong>{{ item.title }}</strong>
+                <span class="muted">{{ item.updatedAt }}</span>
+              </div>
+              <div class="muted">{{ item.lastMessagePreview }}</div>
+              <div class="row" v-if="!isSelectionMode">
+                <el-button @click="openChat(item.conversationId)">继续对话</el-button>
+                <el-button @click="rename(item)">重命名</el-button>
+                <el-button type="danger" @click="remove(item.conversationId)">删除</el-button>
+              </div>
+            </div>
           </div>
         </el-card>
       </div>
@@ -37,6 +58,7 @@ import { useRouter } from "vue-router"
 import { useConversationStore } from "../stores/conversations"
 import { handleError } from "../services/error"
 import type { ConversationListItem } from "../types"
+import { ElMessageBox, ElNotification } from "element-plus"
 
 const router = useRouter()
 const store = useConversationStore()
@@ -45,6 +67,22 @@ const nextCursor = computed(() => store.nextCursor || null)
 const loading = ref(false)
 const loadingMore = ref(false)
 const loadError = ref<string | null>(null)
+
+const isSelectionMode = ref(false)
+const selectedIds = ref<string[]>([])
+
+const toggleSelectionMode = () => {
+  isSelectionMode.value = !isSelectionMode.value
+  selectedIds.value = []
+}
+
+const toggleSelect = (id: string, val: any) => {
+  if (val) {
+    selectedIds.value.push(id)
+  } else {
+    selectedIds.value = selectedIds.value.filter(i => i !== id)
+  }
+}
 
 const loadConversations = async () => {
   loading.value = true
@@ -88,11 +126,60 @@ const rename = async (item: ConversationListItem) => {
 }
 
 const remove = async (conversationId: string) => {
-  if (!window.confirm("确认删除该会话？")) return
   try {
+    await ElMessageBox.confirm("确认删除该会话？", "删除确认", {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+    
     await store.deleteConversation(conversationId)
+    ElNotification({
+      title: '删除成功',
+      message: '点击此处可撤销删除',
+      type: 'success',
+      duration: 5000,
+      onClick: () => {
+        store.restore([conversationId])
+        ElNotification.closeAll()
+      }
+    })
   } catch (error: any) {
-    handleError(error, "删除失败", "history.delete")
+    if (error !== 'cancel') {
+      handleError(error, "删除失败", "history.delete")
+    }
+  }
+}
+
+const batchDelete = async () => {
+  if (selectedIds.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${selectedIds.value.length} 个会话？`, "批量删除确认", {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+    
+    const idsToDelete = [...selectedIds.value]
+    await store.batchDelete(idsToDelete)
+    
+    isSelectionMode.value = false
+    selectedIds.value = []
+    
+    ElNotification({
+      title: '批量删除成功',
+      message: '点击此处可撤销删除',
+      type: 'success',
+      duration: 5000,
+      onClick: () => {
+        store.restore(idsToDelete)
+        ElNotification.closeAll()
+      }
+    })
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      handleError(error, "批量删除失败", "history.batchDelete")
+    }
   }
 }
 </script>
