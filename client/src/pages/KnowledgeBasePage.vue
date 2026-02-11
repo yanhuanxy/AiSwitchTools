@@ -247,8 +247,7 @@ const submitCreate = async () => {
 }
 
 const detail = (id: string) => {
-  // router.push(`/knowledge-bases/${id}`)
-  alert('文档管理功能开发中')
+  router.push(`/knowledge-bases/${id}`)
 }
 
 const remove = async (id: string) => {

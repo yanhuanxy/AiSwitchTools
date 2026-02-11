@@ -90,30 +90,77 @@ export class WorkflowEngineService {
   }
 
   private async executeNode(node: WorkflowNode, context: WorkflowContext, edges: any[]): Promise<any> {
-    switch (node.type) {
-      case 'start':
-        // Pass input to variables
-        context.variables['user_input'] = context.input;
-        return null;
+    const execute = async () => {
+      switch (node.type) {
+        case 'start':
+          context.variables['user_input'] = context.input;
+          return null;
 
-      case 'llm':
-        return this.executeLlmNode(node, context);
+        case 'semantic-analysis':
+          return this.executeSemanticNode(node, context);
 
-      case 'knowledge-base':
-        return this.executeKbNode(node, context);
+        case 'llm':
+          return this.executeLlmNode(node, context);
 
-      case 'condition':
-        return this.executeConditionNode(node, context, edges);
+        case 'knowledge-base':
+          return this.executeKbNode(node, context);
 
-      case 'end':
-        // Return the value specified in config, or the last variable
-        const outputVar = node.data?.outputVar || 'llm_result';
-        return context.variables[outputVar] || context.variables['user_input'];
+        case 'condition':
+          return this.executeConditionNode(node, context, edges);
 
-      default:
-        this.logger.warn(`Unknown node type: ${node.type}`);
-        return null;
+        case 'end':
+          const outputVar = node.data?.outputVar || 'llm_result';
+          return context.variables[outputVar] || context.variables['user_input'];
+
+        default:
+          this.logger.warn(`Unknown node type: ${node.type}`);
+          return null;
+      }
+    };
+
+    // Apply Retry Logic for external calls (LLM, KB)
+    if (['llm', 'knowledge-base', 'semantic-analysis'].includes(node.type)) {
+      return this.withRetry(execute, 3, 200);
     }
+    return execute();
+  }
+
+  private async withRetry<T>(fn: () => Promise<T>, retries: number, delay: number): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries <= 0) throw error;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return this.withRetry(fn, retries - 1, delay * 2);
+    }
+  }
+
+  private async executeSemanticNode(node: WorkflowNode, context: WorkflowContext) {
+    const query = context.variables['user_input'];
+    const prompt = `Analyze the following query.
+Query: ${query}
+Return ONLY a JSON object with: { "intent": "string", "keywords": ["string"] }`;
+
+    const response = await this.llmService.chatCompletion(
+      [{ role: 'user', content: prompt }],
+      { model: 'gpt-3.5-turbo' }
+    );
+
+    let result;
+    try {
+        // Try to find JSON in response if it contains markdown code blocks
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : response;
+        result = JSON.parse(jsonStr);
+    } catch (e) {
+        this.logger.warn('Failed to parse semantic analysis JSON', e);
+        result = { intent: 'general', keywords: [query] };
+    }
+    
+    context.variables['semantic_result'] = result;
+    context.variables['keywords'] = Array.isArray(result.keywords) ? result.keywords.join(' ') : String(result.keywords);
+    context.traceLog.push(`[Semantic] Intent: ${result.intent}`);
+    return { output: result };
   }
 
   private async executeLlmNode(node: WorkflowNode, context: WorkflowContext) {
@@ -129,9 +176,16 @@ export class WorkflowEngineService {
     // Call LLM Service
     const messages: any[] = [{ role: 'user', content: prompt }];
     
-    // We can inject system prompt if configured in node
-    if (node.data?.systemPrompt) {
-      messages.unshift({ role: 'system', content: node.data.systemPrompt });
+    // We can inject system prompt if configured in node or context
+    let systemPrompt = node.data?.systemPrompt;
+    
+    // Dynamic Context Injection (fallback to agent context if not explicit in node)
+    if (!systemPrompt && context.variables['agent_system_prompt']) {
+        systemPrompt = context.variables['agent_system_prompt'];
+    }
+
+    if (systemPrompt) {
+      messages.unshift({ role: 'system', content: systemPrompt });
     }
 
     try {
@@ -193,10 +247,16 @@ export class WorkflowEngineService {
     const kbId = node.data?.knowledgeBaseId;
     if (!kbId) throw new Error('Knowledge Base ID missing in node config');
 
-    const query = context.variables['user_input']; // Default to user input
+    const query = context.variables['keywords'] || context.variables['user_input']; // Use keywords if available
+    
+    // RagService now returns RetrievalResult[]
     const results = await this.ragService.retrieve(kbId, query);
     
-    context.variables['context'] = results.join('\n');
+    // Format context for LLM
+    const contextStr = results.map((r: any) => `[Source: ${r.metadata?.documentId || 'unknown'}] (Score: ${r.score.toFixed(2)})\n${r.content}`).join('\n\n');
+    
+    context.variables['context'] = contextStr;
+    context.variables['retrieved_docs'] = results;
     context.traceLog.push(`[RAG] Retrieved ${results.length} chunks`);
     return { output: results };
   }

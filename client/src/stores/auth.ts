@@ -1,5 +1,6 @@
 import { defineStore } from "pinia"
 import { consumeMagicLink, requestAnonToken, refreshToken, logout as apiLogout } from "../services/auth"
+import router from "../router"
 
 type TokenState = {
   accessToken: string | null
@@ -40,6 +41,11 @@ export const useAuthStore = defineStore("auth", {
     userId: null,
     tokenVersion: null
   }),
+  getters: {
+    isAnonymous: (state) => !state.identityType || state.identityType === 'anon',
+    isAuthenticated: (state) => !!state.accessToken && state.identityType !== 'anon',
+    isRefreshing: () => !!refreshPromise,
+  },
   actions: {
     hydrate() {
       const data = readStorage()
@@ -111,8 +117,24 @@ export const useAuthStore = defineStore("auth", {
       }
     },
     async handleAuthRequired() {
+      const wasAuthenticated = this.isAuthenticated
+      
       this.clearAuth()
       await this.loginAsAnon()
+
+      // If user was logged in (not anon) and session expired, redirect to login
+      // But only if we are not already on a public page?
+      // For now, simple logic: if we were authenticated, we lost session -> login.
+      if (wasAuthenticated) {
+         // Use router to push, but maybe check current route?
+         // We can't easily check current route inside store without importing it, which we did.
+         const currentPath = router.currentRoute.value.path
+         if (currentPath !== '/auth/bind' && !currentPath.startsWith('/auth/')) {
+             // Maybe redirect to a dedicated login page? Or AuthBindPage is the login?
+             // Based on routes: /auth/bind seems to be the auth page.
+             router.push(`/auth/bind?redirect=${encodeURIComponent(currentPath)}`)
+         }
+      }
     },
     async bindWithMagicToken(token: string) {
       const data = await consumeMagicLink(token)

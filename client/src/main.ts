@@ -16,6 +16,13 @@ app.use(ElementPlus)
 setActivePinia(pinia)
 setupApiInterceptors(() => useAuthStore())
 
+app.config.errorHandler = (err, instance, info) => {
+  console.error("Vue Runtime Error:", err)
+  console.error("Component Instance:", instance)
+  console.error("Error Info:", info)
+  // Optional: Report to Sentry or other monitoring service
+}
+
 useAuthStore().ensureAuthReady().finally(() => {
   app.mount("#app")
 })

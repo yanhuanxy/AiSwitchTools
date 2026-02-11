@@ -36,6 +36,11 @@ export class WorkflowController {
     return this.workflowService.update(id, (req as any).user.id, updateWorkflowDto);
   }
 
+  @Post(':id/publish')
+  publish(@Req() req: Request, @Param('id') id: string) {
+    return this.workflowService.publish(id, (req as any).user.id);
+  }
+
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     return this.workflowService.remove(id, (req as any).user.id);

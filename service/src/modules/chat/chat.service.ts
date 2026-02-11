@@ -47,7 +47,11 @@ export class ChatService {
       throw new HttpException('RATE_LIMITED', HttpStatus.TOO_MANY_REQUESTS);
     }
 
-    if (!dto.conversationId || !dto.clientMessageId || !dto.content) {
+    if (!dto.conversationId || !dto.clientMessageId) {
+      throw new BadRequestException('INVALID_PARAMS');
+    }
+
+    if (!dto.content && (!dto.attachmentIds || dto.attachmentIds.length === 0)) {
       throw new BadRequestException('INVALID_PARAMS');
     }
 
@@ -60,7 +64,7 @@ export class ChatService {
     const requestHash = this.chatProvider.hashPayload({
       conversationId: dto.conversationId,
       clientMessageId: dto.clientMessageId,
-      content: dto.content,
+      content: dto.content || '',
       attachmentIds: [...attachmentIds].sort(),
       replyLength: dto.replyLength ?? null,
     });
@@ -109,7 +113,7 @@ export class ChatService {
       promptConfig: this.parsePromptConfig(conversation.characterVersion.promptConfigJson),
       summary: summaryContent,
       recentMessages,
-      currentInput: dto.content,
+      currentInput: dto.content || '',
       attachmentIds: passedAttachmentIds,
       replyLength: dto.replyLength,
     });
@@ -124,7 +128,7 @@ export class ChatService {
       userMessageId,
       assistantMessageId,
       taskId,
-      content: dto.content,
+      content: dto.content || '',
       clientMessageId: dto.clientMessageId,
       attachmentIds,
       model: this.chatProvider.getDefaultModel(),
@@ -469,11 +473,44 @@ export class ChatService {
         .reverse();
 
       for (const msg of history) {
-        let content = msg.content;
-        if (msg.attachments?.length) {
-          const attIds = msg.attachments.map((a) => a.attachment.id).join(', ');
-          content += `\n[attachments: ${attIds}]`;
+        let content: any = msg.content;
+        
+        // Handle Attachments
+         if (msg.attachments?.length) {
+            const parts: any[] = [{ type: 'text', text: msg.content }];
+            let hasImage = false;
+            
+            for (const attachmentRecord of msg.attachments) {
+              const attachment = attachmentRecord.attachment;
+              // Check if image
+              if (attachment.mime.startsWith('image/')) {
+                  try {
+                      const { buffer } = await this.attachmentsService.getAttachmentFileBuffer(attachment.id, ownerUserId);
+                      const base64 = buffer.toString('base64');
+                      parts.push({
+                          type: 'image_url',
+                          image_url: {
+                              url: `data:${attachment.mime};base64,${base64}`
+                          }
+                      });
+                      hasImage = true;
+                  } catch (e) {
+                      console.error(`Failed to load attachment ${attachment.id}`, e);
+                      parts[0].text += `\n[Failed to load attachment: ${attachment.id}]`;
+                  }
+              } else {
+                  // Non-image attachments
+                  parts[0].text += `\n[attachment: ${attachment.id} (${attachment.mime})]`;
+              }
+           }
+           
+           if (hasImage) {
+               content = parts;
+           } else {
+               content = parts[0].text; // Fallback to string if only text appended
+           }
         }
+        
         messagesForLlm.push({
           role: msg.role as 'user' | 'assistant',
           content,

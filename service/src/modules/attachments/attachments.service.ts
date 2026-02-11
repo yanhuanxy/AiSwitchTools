@@ -31,6 +31,18 @@ export class AttachmentsService {
   }
 
   /**
+   * 获取附件文件内容 (Buffer)
+   */
+  async getAttachmentFileBuffer(id: string, ownerUserId: string): Promise<{ buffer: Buffer; mime: string }> {
+      const attachment = await this.attachmentsRepository.findByIdAndOwner(id, ownerUserId);
+      if (!attachment) {
+        throw new NotFoundException(`Attachment ${id} not found`);
+      }
+      const buffer = await this.attachmentsProvider.getFileBuffer(attachment.storageKey);
+      return { buffer, mime: attachment.mime };
+  }
+
+  /**
    * 获取附件信息
    */
   async getAttachment(
@@ -149,6 +161,15 @@ export class AttachmentsService {
    */
   async getAttachmentsByIds(ids: string[], ownerUserId: string): Promise<AttachmentEntity[]> {
     return this.attachmentsRepository.findByIdsAndOwner(ids, ownerUserId);
+  }
+
+  /**
+   * 验证批量所有权
+   */
+  async validateOwnershipBatch(ids: string[], ownerUserId: string): Promise<boolean> {
+    if (!ids || ids.length === 0) return true;
+    const attachments = await this.getAttachmentsByIds(ids, ownerUserId);
+    return attachments.length === ids.length;
   }
 
   /**
@@ -293,7 +314,7 @@ export class AttachmentsService {
 
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (size > maxSize) {
-      throw new ConflictException(`File size exceeds limit: ${size} > ${maxSize}`);
+      throw new ConflictException(`File size exceeds the limit of ${maxSize / 1024 / 1024}MB`);
     }
   }
 
@@ -301,92 +322,42 @@ export class AttachmentsService {
    * 获取文件扩展名
    */
   private getFileExtension(mimeType: string): string {
-    const extensionMap: Record<string, string> = {
+    const map: Record<string, string> = {
       'image/jpeg': 'jpg',
       'image/png': 'png',
       'image/webp': 'webp',
     };
-    return extensionMap[mimeType] || 'bin';
+    return map[mimeType] || 'bin';
   }
 
-  private sanitizeOriginalName(originalName: string, extension: string) {
-    const fallback = `file.${extension}`;
-    const rawName = originalName?.trim() ? originalName.trim() : fallback;
-    const parsed = path.parse(rawName);
-    const base = parsed.name || 'file';
-    const sanitizedBase = base
-      .replace(/\s+/g, '-')
-      .replace(/[^a-zA-Z0-9._-]/g, '');
-    const safeBase = sanitizedBase || 'file';
-    return `${safeBase}.${extension}`;
+  /**
+   * 净化文件名
+   */
+  private sanitizeOriginalName(filename: string, extension: string): string {
+    const name = path.basename(filename, path.extname(filename));
+    const safeName = name.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+    return `${safeName}.${extension}`;
   }
 
-  private generateDownloadToken(ownerUserId: string, attachmentId: string): string {
-    const secret =
-      this.configService?.get('ATTACHMENTS_TOKEN_SECRET', 'dev-secret') ?? 'dev-secret';
-    const expSeconds = this.signedUrlExpiry;
-    const payload = {
-      ownerUserId,
-      attachmentId,
-      exp: Math.floor(Date.now() / 1000) + expSeconds,
-    };
-    const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
-    const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
-    return `${data}.${sig}`;
-  }
-
-  validateDownloadToken(token: string, expectedOwnerUserId: string, expectedAttachmentId: string): boolean {
-    if (!token || typeof token !== 'string') return false;
-    const [data, sig] = token.split('.');
-    if (!data || !sig) return false;
-    const secret =
-      this.configService?.get('ATTACHMENTS_TOKEN_SECRET', 'dev-secret') ?? 'dev-secret';
-    const expectedSig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
-    if (expectedSig !== sig) return false;
-    try {
-      const payload = JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as {
-        ownerUserId: string;
-        attachmentId: string;
-        exp: number;
-      };
-      if (payload.ownerUserId !== expectedOwnerUserId) return false;
-      if (payload.attachmentId !== expectedAttachmentId) return false;
-      if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) {
-        return false;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
+  /**
+   * 构建代理URL
+   */
   private buildProxyUrl(attachmentId: string, token: string): string {
-    return `/api/attachments/${attachmentId}/download?token=${encodeURIComponent(token)}`;
+    // 假设前端代理路径为 /api/attachments/view/:id?token=...
+    return `/api/attachments/view/${attachmentId}?token=${token}`;
   }
 
   /**
-   * 验证附件所有权
+   * 生成下载令牌
    */
-  async validateOwnership(attachmentId: string, ownerUserId: string): Promise<boolean> {
-    return this.attachmentsRepository.exists(attachmentId, ownerUserId);
-  }
-
-  /**
-   * 批量验证附件所有权
-   */
-  async validateOwnershipBatch(attachmentIds: string[], ownerUserId: string): Promise<boolean> {
-    if (!attachmentIds || attachmentIds.length === 0) {
-      return true;
-    }
-
-    const attachments = await this.attachmentsRepository.findByIdsAndOwner(attachmentIds, ownerUserId);
-    return attachments.length === attachmentIds.length;
-  }
-
-  /**
-   * 获取存储配置
-   */
-  async getStorageConfig(): Promise<any> {
-    return this.attachmentsProvider.getStorageStats();
+  private generateDownloadToken(ownerUserId: string, attachmentId: string): string {
+    // 简单生成一个带签名的令牌
+    const payload = `${ownerUserId}:${attachmentId}:${Date.now() + 3600000}`; // 1小时有效
+    const secret = this.configService?.get('JWT_SECRET', 'secret');
+    const signature = crypto
+      .createHmac('sha256', secret || 'secret')
+      .update(payload)
+      .digest('hex');
+    return Buffer.from(`${payload}:${signature}`).toString('base64');
   }
 }

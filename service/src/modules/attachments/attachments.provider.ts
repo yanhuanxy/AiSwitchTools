@@ -99,12 +99,20 @@ export class AttachmentsProvider {
         if (code !== 'ENOENT') {
           throw error;
         }
-        // 文件不存在，忽略错误
       }
       return;
     }
 
-    // TODO: 实现S3/MinIO的文件删除
+    // TODO: 实现S3/MinIO的删除
+    throw new Error('S3/MinIO provider not implemented yet');
+  }
+
+  async getFileBuffer(storageKey: string): Promise<Buffer> {
+    if (this.storageConfig.provider === 'local') {
+        const fs = require('node:fs').promises;
+        const filePath = path.join(process.cwd(), 'uploads', this.storageConfig.bucket ?? '', storageKey);
+        return fs.readFile(filePath);
+    }
     throw new Error('S3/MinIO provider not implemented yet');
   }
 

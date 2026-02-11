@@ -105,7 +105,6 @@
     <!-- Input Area -->
     <div class="flex-shrink-0 bg-white">
       <div class="max-w-3xl mx-auto">
-         <AttachmentStrip @select="handleAttachments" />
          <Composer 
             :sending="sendDisabled" 
             :can-stop="Boolean(activeTask)"
@@ -132,14 +131,12 @@ import { useRoute } from "vue-router"
 import MessageList from "../components/MessageList.vue"
 import Composer from "../components/Composer.vue"
 import TaskControls from "../components/TaskControls.vue"
-import AttachmentStrip from "../components/AttachmentStrip.vue"
 import CButton from "../components/common/CButton.vue"
 import { useConversationStore } from "../stores/conversations"
 import { useChatStore } from "../stores/chat"
 import { useAuthStore } from "../stores/auth"
 import { createChatTask, cancelChatTask, retryAssistantMessage, continueAssistantMessage } from "../services/chat"
 import { createSseConnection } from "../services/sse"
-import { uploadImages } from "../services/attachments"
 import { getErrorMessage, handleError, notifyError, reportError } from "../services/error"
 import { ElMessage } from "element-plus"
 
@@ -179,7 +176,6 @@ const conversationId = computed(() => route.params.conversationId as string)
 const conversationStore = useConversationStore()
 const chatStore = useChatStore()
 const authStore = useAuthStore()
-const attachments = ref<File[]>([])
 const sending = ref(false)
 const sseRef = ref<{ close: () => void } | null>(null)
 const loadingMessages = ref(false)
@@ -247,7 +243,7 @@ const loadHistory = async () => {
   }
 }
 
-const handleSend = async (content: string) => {
+const handleSend = async (content: string, attachmentIds: string[] = []) => {
   if (sending.value) return
   sending.value = true
   
@@ -264,20 +260,8 @@ const handleSend = async (content: string) => {
      // 1. Optimistic UI update
      chatStore.appendMessage(conversationId.value, tempMsg)
      scrollToBottom()
-     
-     // 2. Upload attachments if any
-     let attachmentIds: string[] = []
-     if (attachments.value.length) {
-       try {
-         attachmentIds = await uploadImages(attachments.value)
-         attachments.value = []
-       } catch (uploadErr) {
-         console.error("Attachment upload failed:", uploadErr)
-         throw new Error("附件上传失败")
-       }
-     }
 
-     // 3. Create Chat Task
+     // 2. Create Chat Task
      const { taskId, userMessageId, assistantMessageId } = await createChatTask({
        conversationId: conversationId.value,
        clientMessageId: clientMsgId,
@@ -285,7 +269,7 @@ const handleSend = async (content: string) => {
        attachmentIds
      })
      
-     // 4. Update local state with real IDs
+     // 3. Update local state with real IDs
      // Update user message ID
      chatStore.updateMessage(conversationId.value, clientMsgId, { id: userMessageId })
      
@@ -463,10 +447,6 @@ const handleContinue = async () => {
 
 const handleOnline = () => { isOnline.value = true }
 const handleOffline = () => { isOnline.value = false }
-
-const handleAttachments = (files: File[]) => {
-  attachments.value = files
-}
 
 const generateClientMessageId = () => {
   if (crypto?.randomUUID) return crypto.randomUUID()

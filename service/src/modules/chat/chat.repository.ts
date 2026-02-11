@@ -19,6 +19,7 @@ type MessageAttachmentRecord = {
   attachment: {
     id: string;
     scanStatus: string;
+    mime: string;
   };
 };
 

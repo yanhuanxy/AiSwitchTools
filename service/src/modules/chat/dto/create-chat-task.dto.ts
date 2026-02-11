@@ -10,8 +10,8 @@ export class CreateChatTaskDto {
   clientMessageId!: string;
 
   @IsString()
-  @IsNotEmpty()
-  content!: string;
+  @IsOptional()
+  content?: string;
 
   @IsOptional()
   @IsArray()

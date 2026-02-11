@@ -98,7 +98,19 @@ model CharacterVersion {
   conversations    Conversation[]
 
   @@unique([characterId, version])
-  @@index([characterId, status, version])
+}
+
+model AiModel {
+  id          String   @id @default(uuid())
+  modelId     String
+  provider    String
+  name        String
+  enabled     Boolean  @default(true)
+  deprecated  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([provider, modelId])
 }
 
 model Workflow {
@@ -112,8 +124,23 @@ model Workflow {
   ownerUserId       String
   owner             User               @relation(fields: [ownerUserId], references: [id])
   characterVersions CharacterVersion[]
+  versions          WorkflowVersion[]
 
   @@index([ownerUserId, updatedAt])
+}
+
+model WorkflowVersion {
+  id          String   @id @default(uuid())
+  workflowId  String
+  version     Int
+  versionTag  String
+  graphData   String
+  publishedAt DateTime @default(now())
+  publishedBy String
+  workflow    Workflow @relation(fields: [workflowId], references: [id])
+
+  @@unique([workflowId, version])
+  @@index([workflowId, publishedAt])
 }
 
 model KnowledgeBase {

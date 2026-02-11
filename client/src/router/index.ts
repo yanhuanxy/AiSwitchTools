@@ -14,7 +14,8 @@ const router = createRouter({
     { path: "/auth/magic-link", component: () => import("../pages/MagicLinkCallbackPage.vue") },
     { path: "/workflows", component: () => import("../pages/WorkflowPage.vue") },
     { path: "/workflows/:id/editor", component: () => import("../pages/WorkflowEditorPage.vue") },
-    { path: "/knowledge-bases", component: () => import("../pages/KnowledgeBasePage.vue") }
+    { path: "/knowledge-bases", component: () => import("../pages/KnowledgeBasePage.vue") },
+    { path: "/knowledge-bases/:id", component: () => import("../pages/KnowledgeBaseDetailPage.vue") }
   ]
 })
 

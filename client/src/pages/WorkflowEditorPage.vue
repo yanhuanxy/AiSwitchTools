@@ -11,6 +11,16 @@
       </el-button>
       <strong>{{ workflow?.name }}</strong>
       <div class="flex-grow"></div>
+      <el-button 
+        v-if="!workflow?.published" 
+        type="primary" 
+        plain 
+        @click="confirmPublish" 
+        :loading="publishing"
+        style="margin-right: 10px;"
+      >
+        <span class="mr-1">🚀</span> 发布工作流
+      </el-button>
       <el-button @click="save" :loading="saving">保存</el-button>
     </div>
     <div class="editor-body">
@@ -79,15 +89,23 @@
               <el-form-item label="模型">
                 <el-select v-model="selectedNode.data.model" placeholder="选择模型">
                   <el-option 
-                    v-for="model in llmModels" 
-                    :key="model.id" 
-                    :label="model.name" 
-                    :value="model.id" 
+                    v-for="model in (llmModels || [])" 
+                    :key="model.modelName || model.id" 
+                    :label="model.displayName || model.name" 
+                    :value="model.modelName || model.id" 
                   >
-                    <span>{{ model.name }}</span>
+                    <span>{{ model.displayName || model.name }}</span>
                     <span class="float-right text-gray-400 text-xs ml-2">{{ model.provider }}</span>
                   </el-option>
                 </el-select>
+              </el-form-item>
+              <el-form-item label="系统提示词 (System Prompt)">
+                 <el-input 
+                  v-model="selectedNode.data.systemPrompt" 
+                  type="textarea" 
+                  :rows="3" 
+                  placeholder="可选：输入系统级指令，覆盖 Agent 默认设定"
+                />
               </el-form-item>
               <el-form-item label="Prompt 模板">
                 <el-input 
@@ -102,8 +120,23 @@
 
             <!-- KB Config -->
             <template v-if="selectedNode.type === 'knowledge-base'">
-              <el-form-item label="知识库 ID">
-                <el-input v-model="selectedNode.data.knowledgeBaseId" placeholder="输入 KB ID" />
+              <el-form-item label="选择知识库">
+                <el-select 
+                  v-model="selectedNode.data.knowledgeBaseId" 
+                  placeholder="选择知识库" 
+                  filterable
+                  :loading="loadingKbs"
+                >
+                  <el-option 
+                    v-for="kb in (knowledgeBases || [])" 
+                    :key="kb.id" 
+                    :label="kb.name" 
+                    :value="kb.id" 
+                  >
+                    <span>{{ kb.name }}</span>
+                    <span class="float-right text-gray-400 text-xs ml-2">{{ kb.documentCount }} docs</span>
+                  </el-option>
+                </el-select>
               </el-form-item>
             </template>
 
@@ -145,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { VueFlow, useVueFlow, Connection } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -157,7 +190,7 @@ import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 import { api } from '../services/api'
 import { handleError } from '../services/error'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -167,16 +200,26 @@ const workflow = ref<any>(null)
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const saving = ref(false)
+const publishing = ref(false)
 const selectedNode = ref<any>(null)
 const canvasRef = ref<HTMLElement | null>(null)
 const llmModels = ref<any[]>([])
+const knowledgeBases = ref<any[]>([])
+const loadingKbs = ref(false)
 
 const { toObject, addNodes, removeNodes, addEdges, project, viewport } = useVueFlow()
+
+const isMounted = ref(true)
+
+onUnmounted(() => {
+  isMounted.value = false
+})
 
 onMounted(async () => {
   // Load Workflow
   try {
     const res = await api.get(`/workflows/${id}`)
+    if (!isMounted.value) return
     workflow.value = res.data
     if (res.data.graphData) {
       const graph = JSON.parse(res.data.graphData)
@@ -184,21 +227,44 @@ onMounted(async () => {
       edges.value = graph.edges || []
     }
   } catch (err: any) {
-    handleError(err, '加载失败', 'workflow.load')
+    if (isMounted.value) {
+        handleError(err, '加载失败', 'workflow.load')
+    }
   }
 
   // Load Models
   try {
     const res = await api.get('/llm/models')
-    llmModels.value = res.data
+    if (isMounted.value) {
+        // Backend now returns { models: [...] }
+        llmModels.value = res.data.models || res.data
+    }
   } catch (err: any) {
     console.error('Failed to load LLM models:', err)
     // Fallback if backend fails
-    llmModels.value = [
-      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'openai' },
-      { id: 'gpt-4', name: 'GPT-4', provider: 'openai' }
-    ]
+    if (isMounted.value) {
+        llmModels.value = [
+          { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'openai' },
+          { id: 'gpt-4', name: 'GPT-4', provider: 'openai' }
+        ]
+    }
   }
+
+  // Load Knowledge Bases
+  try {
+    loadingKbs.value = true
+    const res = await api.get('/knowledge-bases')
+    if (isMounted.value) {
+        knowledgeBases.value = res.data
+    }
+  } catch (err: any) {
+    console.error('Failed to load knowledge bases:', err)
+  } finally {
+    if (isMounted.value) {
+        loadingKbs.value = false
+    }
+  }
+  
 })
 
 const goBack = () => {
@@ -316,6 +382,46 @@ const save = async () => {
     handleError(err, '保存失败', 'workflow.save')
   } finally {
     saving.value = false
+  }
+}
+
+const confirmPublish = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确认发布该工作流？发布后草稿将移至已发布列表，且不可再编辑。',
+      '发布确认',
+      {
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    publishWorkflow()
+  } catch {
+    // User cancelled
+  }
+}
+
+const publishWorkflow = async () => {
+  publishing.value = true
+  try {
+    // Save first to ensure latest changes are published
+    await save()
+    
+    const res = await api.post(`/workflows/${id}/publish`)
+    ElMessage.success('发布成功')
+    
+    // Update local state or redirect
+    workflow.value.published = true
+    
+    // Redirect to list or stay? Requirement says: "自动跳转至已发布面板，高亮显示刚发布的工作流"
+    // Assuming list page has tabs. We'll redirect to list.
+    router.push('/workflows?tab=published&highlight=' + id)
+    
+  } catch (err: any) {
+    handleError(err, '发布失败，请稍后重试', 'workflow.publish')
+  } finally {
+    publishing.value = false
   }
 }
 </script>

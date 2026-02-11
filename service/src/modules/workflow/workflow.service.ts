@@ -40,6 +40,47 @@ export class WorkflowService {
     });
   }
 
+  async publish(id: string, userId: string) {
+    this.ensurePrisma();
+    
+    // 1. Get workflow
+    const workflow = await this.prisma.workflow.findFirst({
+      where: { id, ownerUserId: userId },
+    });
+
+    if (!workflow) {
+      throw new Error('Workflow not found');
+    }
+
+    // 2. Determine new version
+    const lastVersion = await this.prisma.workflowVersion.findFirst({
+      where: { workflowId: id },
+      orderBy: { version: 'desc' },
+    });
+
+    const newVersion = (lastVersion?.version || 0) + 1;
+    const versionTag = `v1.0.${newVersion - 1}`; // Simple semver simulation
+
+    // 3. Create version and update workflow
+    const [version] = await this.prisma.$transaction([
+      this.prisma.workflowVersion.create({
+        data: {
+          workflowId: id,
+          version: newVersion,
+          versionTag,
+          graphData: workflow.graphData,
+          publishedBy: userId,
+        },
+      }),
+      this.prisma.workflow.update({
+        where: { id },
+        data: { published: true },
+      }),
+    ]);
+
+    return version;
+  }
+
   remove(id: string, userId: string) {
     this.ensurePrisma();
     return this.prisma.workflow.deleteMany({

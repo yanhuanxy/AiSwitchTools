@@ -1,6 +1,25 @@
 <template>
-  <div class="border-t border-gray-border bg-white p-4">
-    <div class="relative bg-white border border-gray-border rounded-xl shadow-sm hover:border-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all duration-200">
+  <div 
+    class="border-t border-gray-border bg-white p-4 transition-colors duration-200"
+    :class="{ 'bg-[#F5F7FA]': isDragging }"
+    @dragover.prevent="handleDragOver"
+    @dragleave.prevent="handleDragLeave"
+    @drop.prevent="handleDrop"
+  >
+    <div 
+      class="relative bg-white border rounded-xl shadow-sm transition-all duration-200 flex flex-col"
+      :class="[
+        isDragging ? 'border-dashed border-primary border-2' : 'border-gray-border hover:border-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary'
+      ]"
+    >
+      <!-- Image Uploader (Thumbnails) -->
+      <div class="px-3 pt-3">
+        <ChatImageUploader 
+          ref="uploaderRef" 
+          @update:files="handleFilesUpdate" 
+        />
+      </div>
+
       <textarea
         v-model="content"
         rows="3"
@@ -11,8 +30,11 @@
       
       <div class="flex justify-between items-center px-2 pb-2">
         <div class="flex items-center gap-1 text-gray-400">
-          <!-- Placeholder for attachment icons -->
-          <button class="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors" title="上传图片">
+          <button 
+            class="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors" 
+            title="上传图片"
+            @click="triggerUpload"
+          >
              📎
           </button>
         </div>
@@ -33,7 +55,7 @@
           <button
             v-else
             @click="submit"
-            :disabled="sending || !content.trim()"
+            :disabled="sending || (!content.trim() && uploadedFiles.length === 0)"
             class="bg-primary text-white rounded-lg w-8 h-8 flex items-center justify-center hover:bg-primary-hover active:bg-primary-active disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <span v-if="sending" class="animate-spin text-xs">↻</span>
@@ -49,23 +71,74 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue"
+import { ref, computed } from "vue"
+import ChatImageUploader from "./ChatImageUploader/index.vue"
+import type { UploadFile } from "../types/upload"
 
 const emit = defineEmits<{ 
-  (e: "send", value: string): void 
+  (e: "send", value: string, attachmentIds: string[]): void 
   (e: "stop"): void 
 }>()
+
 const props = defineProps<{ 
   sending?: boolean 
   canStop?: boolean
 }>()
+
 const content = ref("")
+const isDragging = ref(false)
+const uploaderRef = ref<InstanceType<typeof ChatImageUploader> | null>(null)
+const files = ref<UploadFile[]>([])
+
+const uploadedFiles = computed(() => 
+  files.value.filter(f => f.status === 'success' && f.id)
+)
+
+const handleFilesUpdate = (updatedFiles: UploadFile[]) => {
+  files.value = updatedFiles
+}
+
+const triggerUpload = () => {
+  uploaderRef.value?.triggerUpload()
+}
+
+const handleDragOver = (e: DragEvent) => {
+  isDragging.value = true
+}
+
+const handleDragLeave = (e: DragEvent) => {
+  // Check if leaving the main container
+  if (e.currentTarget === e.target) {
+    isDragging.value = false
+  }
+}
+
+const handleDrop = (e: DragEvent) => {
+  isDragging.value = false
+  const droppedFiles = Array.from(e.dataTransfer?.files || [])
+  if (droppedFiles.length > 0) {
+    uploaderRef.value?.addFiles(droppedFiles)
+  }
+}
 
 const submit = () => {
   const value = content.value.trim()
-  if (!value || props.sending) return
-  emit("send", value)
+  const attachmentIds = uploadedFiles.value.map(f => f.attachmentId).filter(Boolean) as string[]
+  
+  if ((!value && attachmentIds.length === 0) || props.sending) return
+  
+  emit("send", value, attachmentIds)
+  
+  // Clear content
   content.value = ""
+  // Clear uploader files (assuming they are sent)
+  // Or should we keep them if send fails? 
+  // Parent handles failure. Ideally we clear only on success, but `emit` is fire-and-forget here.
+  // We'll clear them for now to mimic standard chat behavior.
+  if (uploaderRef.value) {
+    uploaderRef.value.files = []
+    files.value = []
+  }
 }
 
 const handleEnter = (e: KeyboardEvent) => {
