@@ -1,3 +1,4 @@
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatService } from './chat.service';
 import { ChatRepository } from './chat.repository';
@@ -7,109 +8,154 @@ import { ChatProvider } from './chat.provider';
 import { SummariesService } from '../summaries/summaries.service';
 import { SafetyService } from '../safety/safety.service';
 import { TasksRepository } from '../tasks/tasks.repository';
-import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
-import { RagService } from '../rag/rag.service';
+import { CHAT_PROCESSOR, IChatProcessor } from './chat.interfaces';
+import { AggregateChatProcessor } from './processors/aggregate-chat.processor';
 
-describe('ChatService Image Handling', () => {
+describe('ChatService', () => {
   let service: ChatService;
   let chatRepository: any;
-  let attachmentsService: any;
-  let llmService: any;
+  let chatProcessor: any;
+  let aggregateChatProcessor: any;
 
   beforeEach(async () => {
     chatRepository = {
       findConversationContext: jest.fn(),
-      findRecentMessages: jest.fn(),
-      findTaskWithConversation: jest.fn(),
-      updateTaskStatus: jest.fn(),
-      updateMessageContent: jest.fn(),
-      updateMessageStatus: jest.fn(),
+      findIdempotencyRecord: jest.fn(),
+      createChatTask: jest.fn(),
+      createIdempotencyRecord: jest.fn(),
     };
-    attachmentsService = {
-      getAttachmentFileBuffer: jest.fn(),
+
+    chatProcessor = {
+      process: jest.fn().mockResolvedValue(undefined),
     };
-    llmService = {
-      chatStream: jest.fn(),
+
+    aggregateChatProcessor = {
+      process: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatService,
         { provide: ChatRepository, useValue: chatRepository },
-        { provide: AttachmentsService, useValue: attachmentsService },
-        { provide: LlmService, useValue: llmService },
-        { provide: ChatProvider, useValue: { getSystemPrompt: () => 'sys', parsePromptConfig: () => null } },
-        { provide: SummariesService, useValue: { getSummary: () => null } },
-        { provide: SafetyService, useValue: {} },
-        { provide: TasksRepository, useValue: chatRepository }, // Mocking task repo same as chat for simplicity
-        { provide: WorkflowEngineService, useValue: {} },
-        { provide: RagService, useValue: { retrieve: () => [] } },
+        { provide: AttachmentsService, useValue: { validateOwnershipBatch: jest.fn().mockResolvedValue(true), filterAttachmentsForModel: jest.fn() } },
+        { provide: LlmService, useValue: {} },
+        { provide: ChatProvider, useValue: { 
+            getSystemPrompt: () => 'sys', 
+            parsePromptConfig: () => null,
+            buildIdempotencyKey: () => 'key',
+            hashPayload: () => 'hash',
+            generateMessageId: () => 'msg-id',
+            generateTaskId: () => 'task-id',
+            getDefaultModel: () => 'model',
+            getIdempotencyTtlMs: () => 1000
+        } },
+        { provide: SummariesService, useValue: { getSummary: () => null, generateSummary: jest.fn() } },
+        { provide: SafetyService, useValue: { checkRateLimit: () => ({ allowed: true }) } },
+        { provide: TasksRepository, useValue: {} },
+        { provide: CHAT_PROCESSOR, useValue: chatProcessor },
+        { provide: AggregateChatProcessor, useValue: aggregateChatProcessor },
       ],
     }).compile();
 
     service = module.get<ChatService>(ChatService);
   });
 
-  it('should construct multimodal message for image attachment', async () => {
-    // Setup
-    const taskId = 'task-1';
-    const ownerUserId = 'user-1';
-    const attachmentId = 'att-1';
-    
-    chatRepository.findTaskWithConversation.mockResolvedValue({
-      conversationId: 'conv-1',
-      assistantMessageId: 'msg-2',
-      model: 'gpt-4-vision',
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  describe('createTask', () => {
+    it('should call chatProcessor.process', async () => {
+      const dto = {
+        conversationId: 'conv-1',
+        clientMessageId: 'client-1',
+        content: 'Hello',
+      };
+      const ownerUserId = 'user-1';
+
+      chatRepository.findConversationContext.mockResolvedValue({ id: 'conv-1' });
+
+      await service.createTask(ownerUserId, dto);
+
+      // Wait for async process to be called (it's called without await in service)
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(chatProcessor.process).toHaveBeenCalled();
     });
-    
-    chatRepository.findConversationContext.mockResolvedValue({
-      characterVersion: { promptConfigJson: '{}' }
+  });
+
+  describe('createTaskV2', () => {
+    it('should call aggregateChatProcessor.process', async () => {
+      const dto = {
+        conversationId: 'conv-1',
+        clientMessageId: 'client-1',
+        content: 'Hello',
+      };
+      const ownerUserId = 'user-1';
+
+      chatRepository.findConversationContext.mockResolvedValue({ id: 'conv-1' });
+
+      await service.createTaskV2(ownerUserId, dto);
+
+      // Wait for async process to be called
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(aggregateChatProcessor.process).toHaveBeenCalled();
     });
 
-    chatRepository.findRecentMessages.mockResolvedValue([
-      {
-        id: 'msg-1',
-        role: 'user',
-        content: 'Look at this image',
-        attachments: [
-          {
-            attachment: {
-              id: attachmentId,
-              mime: 'image/jpeg',
-            }
-          }
-        ]
-      }
-    ]);
+    it('should throw error if aggregateChatProcessor is undefined', async () => {
+       // Re-create service with undefined aggregateChatProcessor to simulate the error condition
+       const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          ChatService,
+          { provide: ChatRepository, useValue: chatRepository },
+          { provide: AttachmentsService, useValue: { validateOwnershipBatch: jest.fn().mockResolvedValue(true), filterAttachmentsForModel: jest.fn() } },
+          { provide: LlmService, useValue: {} },
+          { provide: ChatProvider, useValue: { 
+              getSystemPrompt: () => 'sys', 
+              parsePromptConfig: () => null,
+              buildIdempotencyKey: () => 'key',
+              hashPayload: () => 'hash',
+              generateMessageId: () => 'msg-id',
+              generateTaskId: () => 'task-id',
+              getDefaultModel: () => 'model',
+              getIdempotencyTtlMs: () => 1000
+          } },
+          { provide: SummariesService, useValue: { getSummary: () => null, generateSummary: jest.fn() } },
+          { provide: SafetyService, useValue: { checkRateLimit: () => ({ allowed: true }) } },
+          { provide: TasksRepository, useValue: {} },
+          { provide: CHAT_PROCESSOR, useValue: chatProcessor },
+          // Explicitly not providing AggregateChatProcessor, or providing null?
+          // NestJS requires providers to be defined. If we want to simulate undefined injection, we can use useValue: undefined (but Nest throws).
+          // We can use a factory that returns undefined?
+          { provide: AggregateChatProcessor, useFactory: () => undefined },
+        ],
+      }).compile();
 
-    attachmentsService.getAttachmentFileBuffer.mockResolvedValue({
-      buffer: Buffer.from('fake-image-data'),
-      mime: 'image/jpeg'
-    });
+      const brokenService = module.get<ChatService>(ChatService);
+      
+      const dto = {
+        conversationId: 'conv-1',
+        clientMessageId: 'client-1',
+        content: 'Hello',
+      };
+      const ownerUserId = 'user-1';
+      chatRepository.findConversationContext.mockResolvedValue({ id: 'conv-1' });
 
-    llmService.chatStream.mockImplementation(async function* () {
-      yield { content: 'I see the image' };
-    });
+      // The error is thrown INSIDE the async processor callback, which is caught by .catch() in handleCreateTask
+      // console.error is called. We should spy on console.error.
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
 
-    // Execute
-    // Access private method for testing via any cast
-    await (service as any).processTask(taskId, ownerUserId);
+      await brokenService.createTaskV2(ownerUserId, dto);
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Verify
-    expect(attachmentsService.getAttachmentFileBuffer).toHaveBeenCalledWith(attachmentId, ownerUserId);
-    
-    const callArgs = llmService.chatStream.mock.calls[0];
-    const messages = callArgs[0];
-    const userMsg = messages.find((m: any) => m.role === 'user');
-    
-    expect(Array.isArray(userMsg.content)).toBe(true);
-    expect(userMsg.content).toHaveLength(2);
-    expect(userMsg.content[0]).toEqual({ type: 'text', text: 'Look at this image' });
-    expect(userMsg.content[1]).toEqual({
-      type: 'image_url',
-      image_url: {
-        url: 'data:image/jpeg;base64,ZmFrZS1pbWFnZS1kYXRh' // base64 of 'fake-image-data'
-      }
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'Background task error', 
+        expect.objectContaining({ message: 'AggregateChatProcessor is not initialized' })
+      );
+      
+      consoleSpy.mockRestore();
     });
   });
 });

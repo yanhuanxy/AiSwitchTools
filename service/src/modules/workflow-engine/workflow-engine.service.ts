@@ -1,17 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { RagService } from '../rag/rag.service';
 import { WorkflowContext, WorkflowNode } from './types';
+import { ModelConfigService } from '../llm/model-config.service';
 
 @Injectable()
 export class WorkflowEngineService {
   private readonly logger = new Logger(WorkflowEngineService.name);
 
   constructor(
-    private prisma: PrismaService,
-    private llmService: LlmService,
-    private ragService: RagService,
+    @Inject(PrismaService) private prisma: PrismaService,
+    @Inject(LlmService) private llmService: LlmService,
+    @Inject(RagService) private ragService: RagService,
+    @Inject(ModelConfigService) private readonly modelConfigService: ModelConfigService,
   ) {}
 
   async executeWorkflow(
@@ -27,6 +29,21 @@ export class WorkflowEngineService {
     }
 
     const graph = JSON.parse(workflow.graphData);
+    return this.executeGraph(graph, initialContext, workflow.name);
+  }
+
+  async executeDynamicWorkflow(
+    graphData: any,
+    initialContext: Omit<WorkflowContext, 'variables' | 'traceLog'>,
+  ): Promise<string> {
+    return this.executeGraph(graphData, initialContext, 'Dynamic Workflow');
+  }
+
+  private async executeGraph(
+    graph: any,
+    initialContext: Omit<WorkflowContext, 'variables' | 'traceLog'>,
+    workflowName: string
+  ): Promise<string> {
     const nodes: WorkflowNode[] = graph.nodes;
     const edges: any[] = graph.edges;
 
@@ -43,7 +60,7 @@ export class WorkflowEngineService {
       throw new Error('No Start node found in workflow');
     }
 
-    context.traceLog.push(`[System] Started workflow ${workflow.name}`);
+    context.traceLog.push(`[System] Started workflow ${workflowName}`);
 
     // Execution Loop (Simple linear/branching traversal)
     // Limitation: Does not support parallel branches or cycles effectively yet (MVP)
@@ -143,7 +160,7 @@ Return ONLY a JSON object with: { "intent": "string", "keywords": ["string"] }`;
 
     const response = await this.llmService.chatCompletion(
       [{ role: 'user', content: prompt }],
-      { model: 'gpt-3.5-turbo' }
+      { model: this.modelConfigService.semanticAnalysisModel }
     );
 
     let result;
@@ -165,7 +182,7 @@ Return ONLY a JSON object with: { "intent": "string", "keywords": ["string"] }`;
 
   private async executeLlmNode(node: WorkflowNode, context: WorkflowContext) {
     const promptTemplate = node.data?.prompt || '{{user_input}}';
-    const model = node.data?.model || 'gpt-3.5-turbo';
+    const model = node.data?.model || this.modelConfigService.defaultChatModel;
 
     // Simple template replacement
     let prompt = promptTemplate;

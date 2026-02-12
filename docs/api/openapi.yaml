@@ -1,0 +1,115 @@
+
+openapi: 3.1.0
+info:
+  title: AiSwitchTools Agent Platform API
+  version: 4.0.0
+  description: API for AiSwitchTools Agent Runtime, supporting Role and Agent modes.
+servers:
+  - url: http://localhost:3000/api
+    description: Local Development Server
+
+paths:
+  /chat/completion:
+    post:
+      summary: Create a new chat completion (Agent V2)
+      operationId: createChatCompletion
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatTaskDto'
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatTaskResult'
+        '400':
+          description: Invalid input
+
+  /chat/tasks:
+    post:
+      summary: Create a chat task (Legacy V1)
+      operationId: createChatTask
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatTaskDto'
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatTaskResult'
+
+  /v4/health:
+    get:
+      summary: System Health Check
+      tags:
+        - Observability
+      responses:
+        '200':
+          description: System is UP
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  version:
+                    type: string
+                    example: 4.0.0
+
+  /v4/metrics:
+    get:
+      summary: System Metrics (Prometheus compatible JSON)
+      tags:
+        - Observability
+      responses:
+        '200':
+          description: Metrics snapshot
+
+components:
+  schemas:
+    CreateChatTaskDto:
+      type: object
+      required:
+        - conversationId
+        - clientMessageId
+      properties:
+        conversationId:
+          type: string
+        clientMessageId:
+          type: string
+        content:
+          type: string
+        attachmentIds:
+          type: array
+          items:
+            type: string
+        replyLength:
+          type: string
+          enum: [short, medium, long, auto]
+
+    ChatTaskResult:
+      type: object
+      properties:
+        userMessageId:
+          type: string
+        assistantMessageId:
+          type: string
+        taskId:
+          type: string
+        traceId:
+          type: string

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, HttpException, HttpStatus, Inject } from
 import { Request, Response } from 'express';
 import { TasksRepository } from './tasks.repository';
 import { TasksProvider } from './tasks.provider';
+import { ulid } from 'ulid';
 
 type GenerationTaskStatusType =
   | 'pending'
@@ -64,7 +65,6 @@ export class TasksService {
       }
 
       let closed = false;
-      let eventId = 1;
       let lastSentAt = Date.now();
       let lastContent = assistantMessage.content || '';
 
@@ -72,10 +72,17 @@ export class TasksService {
         if (closed) {
           return;
         }
+        const eventId = ulid();
         response.write(`id: ${eventId}\n`);
         response.write(`event: ${event}\n`);
+        response.write(`retry: 3000\n`);
         response.write(`data: ${JSON.stringify(data)}\n\n`);
-        eventId += 1;
+        lastSentAt = Date.now();
+      };
+
+      const writeHeartbeat = () => {
+        if (closed) return;
+        response.write(`:keep-alive\n\n`);
         lastSentAt = Date.now();
       };
 
@@ -187,14 +194,14 @@ export class TasksService {
       }, this.tasksProvider.getPollIntervalMs());
 
       heartbeatInterval = setInterval(() => {
-        writeEvent('keepalive', {});
-      }, this.tasksProvider.getHeartbeatMs());
+        writeHeartbeat();
+      }, 15000); // 15s heartbeat
 
       idleInterval = setInterval(() => {
-        if (Date.now() - lastSentAt > this.tasksProvider.getIdleTimeoutMs()) {
+        if (Date.now() - lastSentAt > 45000) { // 45s timeout
           response.end();
         }
-      }, this.tasksProvider.getIdleTimeoutMs());
+      }, 5000);
 
       request.on('close', cleanup);
       response.on('close', cleanup);

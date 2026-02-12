@@ -1,3 +1,4 @@
+
 import {
   BadRequestException,
   ConflictException,
@@ -14,18 +15,9 @@ import { ChatContinueResult, ChatRetryResult, ChatTaskResult } from './entities'
 import { AttachmentsService } from '../attachments/attachments.service';
 import { SummariesService } from '../summaries/summaries.service';
 import { SafetyService } from '../safety/safety.service';
-import { LlmService, ChatMessage } from '../llm/llm.service';
 import { TasksRepository } from '../tasks/tasks.repository';
-import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
-import { RagService } from '../rag/rag.service';
-
-type PromptConfig = {
-  backgroundStory?: string;
-  personalityTags?: string[];
-  speakingStyle?: string;
-  fewShotExamples?: Array<{ user: string; assistant: string }>;
-  tabooAndBoundaries?: string;
-};
+import { CHAT_PROCESSOR, IChatProcessor } from './chat.interfaces';
+import { AggregateChatProcessor } from './processors/aggregate-chat.processor';
 
 @Injectable()
 export class ChatService {
@@ -35,14 +27,46 @@ export class ChatService {
     @Inject(AttachmentsService) private readonly attachmentsService: AttachmentsService,
     @Inject(SummariesService) private readonly summariesService: SummariesService,
     @Inject(SafetyService) private readonly safetyService: SafetyService,
-    @Inject(LlmService) private readonly llmService: LlmService,
     @Inject(TasksRepository) private readonly tasksRepository: TasksRepository,
-    private readonly workflowEngine: WorkflowEngineService,
-    private readonly ragService: RagService,
+    @Inject(CHAT_PROCESSOR) private readonly chatProcessor: IChatProcessor,
+    @Inject(AggregateChatProcessor) private readonly aggregateChatProcessor: AggregateChatProcessor,
   ) {}
 
   async createTask(ownerUserId: string, dto: CreateChatTaskDto): Promise<ChatTaskResult> {
-    const rateLimit = this.safetyService.checkRateLimit(ownerUserId, 'POST /api/chat/tasks');
+    return this.handleCreateTask(
+      ownerUserId, 
+      dto, 
+      'POST /api/chat/tasks', 
+      async (taskId, userId) => {
+        if (!this.chatProcessor) {
+           throw new Error('ChatProcessor is not initialized');
+        }
+        return this.chatProcessor.process(taskId, userId);
+      }
+    );
+  }
+
+  async createTaskV2(ownerUserId: string, dto: CreateChatTaskDto): Promise<ChatTaskResult> {
+    return this.handleCreateTask(
+      ownerUserId, 
+      dto, 
+      'POST /api/chat/completion', 
+      async (taskId, userId) => {
+        if (!this.aggregateChatProcessor) {
+           throw new Error('AggregateChatProcessor is not initialized');
+        }
+        return this.aggregateChatProcessor.process(taskId, userId);
+      }
+    );
+  }
+
+  private async handleCreateTask(
+    ownerUserId: string,
+    dto: CreateChatTaskDto,
+    route: string,
+    processor: (taskId: string, userId: string) => Promise<void>
+  ): Promise<ChatTaskResult> {
+    const rateLimit = this.safetyService.checkRateLimit(ownerUserId, route);
     if (!rateLimit.allowed) {
       throw new HttpException('RATE_LIMITED', HttpStatus.TOO_MANY_REQUESTS);
     }
@@ -97,26 +121,11 @@ export class ChatService {
       throw new BadRequestException('INVALID_PARAMS');
     }
 
-    const passedAttachmentIds = await this.attachmentsService.filterAttachmentsForModel(
+    // Filter attachments is just a check/filter, usually doesn't throw
+    await this.attachmentsService.filterAttachmentsForModel(
       attachmentIds,
       ownerUserId,
     );
-    const summaryContent = await this.getSummaryContent(dto.conversationId, ownerUserId);
-    const recentMessages = await this.chatRepository.findRecentMessages({
-      conversationId: dto.conversationId,
-      ownerUserId,
-      limit: 20,
-    });
-
-    this.buildPrompt({
-      systemPrompt: this.chatProvider.getSystemPrompt(),
-      promptConfig: this.parsePromptConfig(conversation.characterVersion.promptConfigJson),
-      summary: summaryContent,
-      recentMessages,
-      currentInput: dto.content || '',
-      attachmentIds: passedAttachmentIds,
-      replyLength: dto.replyLength,
-    });
 
     const userMessageId = this.chatProvider.generateMessageId();
     const assistantMessageId = this.chatProvider.generateMessageId();
@@ -143,7 +152,7 @@ export class ChatService {
     await this.chatRepository.createIdempotencyRecord({
       key: idempotencyKey,
       ownerUserId,
-      route: 'POST /api/chat/tasks',
+      route: route,
       requestHash,
       responseJson: JSON.stringify(response),
       expiresAt: new Date(Date.now() + this.chatProvider.getIdempotencyTtlMs()),
@@ -152,7 +161,7 @@ export class ChatService {
     await this.tryGenerateSummary(dto.conversationId, ownerUserId);
 
     // Trigger async processing
-    this.processTask(taskId, ownerUserId).catch(err => console.error('Background task error', err));
+    processor(taskId, ownerUserId).catch(err => console.error('Background task error', err));
 
     return response;
   }
@@ -194,7 +203,7 @@ export class ChatService {
       model: this.chatProvider.getDefaultModel(),
     });
 
-    this.processTask(taskId, ownerUserId).catch(err => console.error('Background task error', err));
+    this.chatProcessor.process(taskId, ownerUserId).catch(err => console.error('Background task error', err));
 
     return { newAssistantMessageId, taskId };
   }
@@ -229,7 +238,7 @@ export class ChatService {
       model: this.chatProvider.getDefaultModel(),
     });
 
-    this.processTask(taskId, ownerUserId).catch(err => console.error('Background task error', err));
+    this.chatProcessor.process(taskId, ownerUserId).catch(err => console.error('Background task error', err));
 
     return { assistantMessageId: message.id, taskId };
   }
@@ -248,106 +257,6 @@ export class ChatService {
     return normalized;
   }
 
-  private parsePromptConfig(raw: string): PromptConfig | null {
-    if (!raw) {
-      return null;
-    }
-    try {
-      return JSON.parse(raw) as PromptConfig;
-    } catch {
-      return null;
-    }
-  }
-
-  private buildPrompt(params: {
-    systemPrompt: string;
-    promptConfig: PromptConfig | null;
-    summary: string | null;
-    recentMessages: Array<{
-      role: string;
-      content: string;
-      status: string;
-      supersededByMessageId: string | null;
-    }>;
-    currentInput: string;
-    attachmentIds: string[];
-    replyLength?: string;
-  }) {
-    const items: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
-
-    if (params.systemPrompt) {
-      items.push({ role: 'system', content: params.systemPrompt });
-    }
-    if (params.replyLength) {
-      items.push({ role: 'system', content: `Reply length: ${params.replyLength}` });
-    }
-
-    const config = params.promptConfig;
-    if (config?.backgroundStory) {
-      items.push({ role: 'system', content: config.backgroundStory });
-    }
-    if (config?.personalityTags?.length) {
-      items.push({
-        role: 'system',
-        content: `Personality tags: ${config.personalityTags.join(', ')}`,
-      });
-    }
-    if (config?.speakingStyle) {
-      items.push({ role: 'system', content: config.speakingStyle });
-    }
-    if (config?.tabooAndBoundaries) {
-      items.push({ role: 'system', content: config.tabooAndBoundaries });
-    }
-    if (config?.fewShotExamples?.length) {
-      for (const example of config.fewShotExamples) {
-        if (example.user) {
-          items.push({ role: 'user', content: example.user });
-        }
-        if (example.assistant) {
-          items.push({ role: 'assistant', content: example.assistant });
-        }
-      }
-    }
-    if (params.summary) {
-      items.push({ role: 'system', content: params.summary });
-    }
-
-    const ordered = [...params.recentMessages].reverse();
-    for (const message of ordered) {
-      if (message.supersededByMessageId) {
-        continue;
-      }
-      if (message.role === 'user' && message.status !== 'sent') {
-        continue;
-      }
-      if (
-        message.role === 'assistant' &&
-        !['completed', 'failed', 'canceled'].includes(message.status)
-      ) {
-        continue;
-      }
-      const role = message.role === 'assistant' ? 'assistant' : 'user';
-      items.push({ role, content: message.content });
-    }
-
-    let input = params.currentInput;
-    if (params.attachmentIds.length > 0) {
-      input = `${input}\n[attachments: ${params.attachmentIds.join(', ')}]`;
-    }
-    items.push({ role: 'user', content: input });
-
-    return items;
-  }
-
-  private async getSummaryContent(conversationId: string, ownerUserId: string) {
-    try {
-      const summary = await this.summariesService.getSummary(conversationId, ownerUserId);
-      return summary.content;
-    } catch {
-      return null;
-    }
-  }
-
   private async tryGenerateSummary(conversationId: string, ownerUserId: string) {
     try {
       await this.summariesService.generateSummary(conversationId, ownerUserId);
@@ -356,222 +265,6 @@ export class ChatService {
         return;
       }
       throw error;
-    }
-  }
-
-  private async processTask(taskId: string, ownerUserId: string) {
-    try {
-      const task = await this.tasksRepository.findTaskWithConversation(taskId, ownerUserId);
-      if (!task) return;
-
-      const conversation = await this.chatRepository.findConversationContext({
-        id: task.conversationId,
-        ownerUserId,
-      });
-      if (!conversation) {
-        await this.tasksRepository.updateTaskStatus({
-          taskId,
-          status: 'failed',
-          errorMessage: 'Conversation not found',
-        });
-        return;
-      }
-
-      const recentMessages = await this.chatRepository.findRecentMessages({
-        conversationId: task.conversationId,
-        ownerUserId,
-        limit: 50,
-      });
-
-      // 1. Check for Workflow Binding
-      if (conversation.characterVersion.workflowId) {
-        try {
-          await this.tasksRepository.updateTaskStatus({ taskId, status: 'running' });
-          const userMessage = recentMessages.find((m) => m.role === 'user');
-          const input = userMessage?.content || '';
-
-          const output = await this.workflowEngine.executeWorkflow(
-            conversation.characterVersion.workflowId,
-            {
-              userId: ownerUserId,
-              conversationId: task.conversationId,
-              input,
-              history: recentMessages,
-            }
-          );
-
-          await this.tasksRepository.updateMessageContent(task.assistantMessageId, output);
-          await this.tasksRepository.updateMessageStatus({
-            messageId: task.assistantMessageId,
-            status: 'completed',
-            partial: false,
-          });
-          await this.tasksRepository.updateTaskStatus({
-            taskId,
-            status: 'completed',
-            tokenUsageCompletion: 0, 
-            tokenUsageTotal: 0,
-          });
-          return;
-        } catch (error) {
-           console.error('Workflow execution failed', error);
-           throw error;
-        }
-      }
-
-      const summaryContent = await this.getSummaryContent(task.conversationId, ownerUserId);
-      const messagesForLlm: ChatMessage[] = [];
-      const systemPrompt = this.chatProvider.getSystemPrompt();
-      if (systemPrompt) {
-        messagesForLlm.push({ role: 'system', content: systemPrompt });
-      }
-
-      // 2. Check for Knowledge Base Binding (RAG)
-      if (conversation.characterVersion.knowledgeBaseId) {
-        const userMessage = recentMessages.find((m) => m.role === 'user');
-        const query = userMessage?.content || '';
-        const ragContext = await this.ragService.retrieve(conversation.characterVersion.knowledgeBaseId, query);
-        if (ragContext.length > 0) {
-          messagesForLlm.push({ 
-            role: 'system', 
-            content: `Relevant Context from Knowledge Base:\n${ragContext.join('\n---\n')}` 
-          });
-        }
-      }
-
-      const config = this.parsePromptConfig(conversation.characterVersion.promptConfigJson);
-      if (config) {
-        if (config.backgroundStory) {
-          messagesForLlm.push({ role: 'system', content: config.backgroundStory });
-        }
-        if (config.personalityTags?.length) {
-          messagesForLlm.push({
-            role: 'system',
-            content: `Personality tags: ${config.personalityTags.join(', ')}`,
-          });
-        }
-        if (config.speakingStyle) {
-          messagesForLlm.push({ role: 'system', content: config.speakingStyle });
-        }
-        if (config.tabooAndBoundaries) {
-          messagesForLlm.push({ role: 'system', content: config.tabooAndBoundaries });
-        }
-        if (config.fewShotExamples?.length) {
-          for (const example of config.fewShotExamples) {
-            if (example.user) messagesForLlm.push({ role: 'user', content: example.user });
-            if (example.assistant) messagesForLlm.push({ role: 'assistant', content: example.assistant });
-          }
-        }
-      }
-
-      if (summaryContent) {
-        messagesForLlm.push({ role: 'system', content: summaryContent });
-      }
-
-      const history = recentMessages
-        .filter((m) => m.id !== task.assistantMessageId)
-        .reverse();
-
-      for (const msg of history) {
-        let content: any = msg.content;
-        
-        // Handle Attachments
-         if (msg.attachments?.length) {
-            const parts: any[] = [{ type: 'text', text: msg.content }];
-            let hasImage = false;
-            
-            for (const attachmentRecord of msg.attachments) {
-              const attachment = attachmentRecord.attachment;
-              // Check if image
-              if (attachment.mime.startsWith('image/')) {
-                  try {
-                      const { buffer } = await this.attachmentsService.getAttachmentFileBuffer(attachment.id, ownerUserId);
-                      const base64 = buffer.toString('base64');
-                      parts.push({
-                          type: 'image_url',
-                          image_url: {
-                              url: `data:${attachment.mime};base64,${base64}`
-                          }
-                      });
-                      hasImage = true;
-                  } catch (e) {
-                      console.error(`Failed to load attachment ${attachment.id}`, e);
-                      parts[0].text += `\n[Failed to load attachment: ${attachment.id}]`;
-                  }
-              } else {
-                  // Non-image attachments
-                  parts[0].text += `\n[attachment: ${attachment.id} (${attachment.mime})]`;
-              }
-           }
-           
-           if (hasImage) {
-               content = parts;
-           } else {
-               content = parts[0].text; // Fallback to string if only text appended
-           }
-        }
-        
-        messagesForLlm.push({
-          role: msg.role as 'user' | 'assistant',
-          content,
-        });
-      }
-
-      await this.tasksRepository.updateTaskStatus({ taskId, status: 'running' });
-
-      const stream = await this.llmService.chatStream(messagesForLlm, {
-        model: task.model,
-      });
-
-      let fullContent = '';
-      let buffer = '';
-      let lastUpdate = Date.now();
-
-      for await (const chunk of stream) {
-        const content = chunk.content || '';
-        if (content) {
-          fullContent += content;
-          buffer += content;
-
-          if (Date.now() - lastUpdate > 200 || buffer.length > 20) {
-            await this.tasksRepository.updateMessageContent(
-              task.assistantMessageId,
-              fullContent,
-            );
-            buffer = '';
-            lastUpdate = Date.now();
-          }
-        }
-      }
-
-      await this.tasksRepository.updateMessageContent(task.assistantMessageId, fullContent);
-      await this.tasksRepository.updateMessageStatus({
-        messageId: task.assistantMessageId,
-        status: 'completed',
-        partial: false,
-      });
-      await this.tasksRepository.updateTaskStatus({
-        taskId,
-        status: 'completed',
-        tokenUsageCompletion: Math.ceil(fullContent.length / 3),
-        tokenUsageTotal: 0, 
-      });
-    } catch (error) {
-      console.error('Task processing failed', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      await this.tasksRepository.updateTaskStatus({
-        taskId,
-        status: 'failed',
-        errorMessage,
-      });
-      const task = await this.tasksRepository.findTaskWithConversation(taskId, ownerUserId);
-      if (task) {
-        await this.tasksRepository.updateMessageStatus({
-          messageId: task.assistantMessageId,
-          status: 'failed',
-          partial: true,
-        });
-      }
     }
   }
 }

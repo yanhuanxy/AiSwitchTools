@@ -15,6 +15,21 @@ export const createChatTask = async (payload: {
   return data
 }
 
+export const createChatCompletion = async (payload: {
+  conversationId: string
+  clientMessageId: string
+  content: string
+  attachmentIds?: string[]
+  replyLength?: "short" | "medium" | "long" | "auto"
+}) => {
+  const { data } = await apiClient.post<{
+    userMessageId: string
+    assistantMessageId: string
+    taskId: string
+  }>("/chat/completion", payload)
+  return data
+}
+
 export const cancelChatTask = async (taskId: string) => {
   const { data } = await apiClient.post<{ taskId: string; status: string }>(
     `/chat/tasks/${taskId}/cancel`

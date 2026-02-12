@@ -5,6 +5,49 @@ import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HttpException } from '@nestjs/common';
+import { ModelConfigService } from './model-config.service';
+import { LocalVectorService } from './local-vector.service';
+
+// Mock the TransformersVectorService module entirely to avoid import side effects
+jest.mock('./transformers-vector.service', () => {
+  return {
+    TransformersVectorService: jest.fn().mockImplementation(() => ({
+      getEmbedding: jest.fn(),
+      getEmbeddings: jest.fn(),
+      isAvailable: jest.fn().mockResolvedValue(true),
+    })),
+  };
+});
+
+// Mock LocalVectorService but we also need to mock its dependencies or implementation
+// Since we are testing LlmService, we should mock LocalVectorService entirely
+jest.mock('./local-vector.service', () => {
+  return {
+    LocalVectorService: jest.fn().mockImplementation(() => ({
+      getEmbedding: jest.fn(),
+      getEmbeddings: jest.fn(),
+      isAvailable: jest.fn().mockResolvedValue(true),
+    })),
+  };
+});
+
+// Mocks for OpenAI and Anthropic
+const mockOpenAICreate = jest.fn();
+const mockOpenAIEmbeddings = jest.fn();
+
+
+jest.mock('openai', () => {
+  return jest.fn().mockImplementation(() => ({
+    chat: { completions: { create: mockOpenAICreate } },
+    embeddings: { create: mockOpenAIEmbeddings },
+  }));
+});
+
+jest.mock('@anthropic-ai/sdk', () => {
+  return jest.fn().mockImplementation(() => ({
+    messages: { create: jest.fn() },
+  }));
+});
 
 const mockConfigService = {
   get: jest.fn(),
@@ -22,6 +65,22 @@ const mockPrismaService = {
   },
 };
 
+const mockModelConfigService = {
+  embeddingModel: 'text-embedding-mock',
+  defaultChatModel: 'gpt-mock',
+  semanticAnalysisModel: 'gpt-mock',
+  fallbackModel: 'gpt-mock',
+  openaiApiKey: undefined,
+  authToken: 'test-token',
+  reload: jest.fn(),
+};
+
+const mockLocalVectorService = {
+  getEmbedding: jest.fn(),
+  getEmbeddings: jest.fn(),
+  isAvailable: jest.fn(),
+};
+
 describe('LlmService', () => {
   let service: LlmService;
 
@@ -33,6 +92,8 @@ describe('LlmService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CACHE_MANAGER, useValue: mockCacheManager },
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: ModelConfigService, useValue: mockModelConfigService },
+        { provide: LocalVectorService, useValue: mockLocalVectorService },
       ],
     }).compile();
 
@@ -94,6 +155,124 @@ describe('LlmService', () => {
       // Since we mocked ConfigService get returning null for keys, clients won't init.
 
       await expect(service.getAvailableModels()).rejects.toThrow(HttpException);
+    });
+  });
+
+  describe('getEmbedding', () => {
+    it('should prefer Local Vector Service if successful', async () => {
+        const localEmbedding = [0.9, 0.9, 0.9];
+        mockLocalVectorService.getEmbedding.mockResolvedValue(localEmbedding);
+
+        const result = await service.getEmbedding('test');
+
+        expect(result).toEqual(localEmbedding);
+        expect(mockLocalVectorService.getEmbedding).toHaveBeenCalledWith('test');
+        expect(mockOpenAIEmbeddings).not.toHaveBeenCalled();
+    });
+
+    it('should fallback to OpenAI if Local Vector Service fails', async () => {
+        mockLocalVectorService.getEmbedding.mockRejectedValue(new Error('Local fail'));
+        
+        // Setup OpenAI
+        (mockModelConfigService as any).openaiApiKey = 'sk-test';
+        mockConfigService.get.mockImplementation((key) => key === 'LLM_TYPE' ? 'Anthropic' : null);
+        
+        // Re-compile to init openai
+        const module: TestingModule = await Test.createTestingModule({
+            providers: [
+              LlmService,
+              { provide: ConfigService, useValue: mockConfigService },
+              { provide: CACHE_MANAGER, useValue: mockCacheManager },
+              { provide: PrismaService, useValue: mockPrismaService },
+              { provide: ModelConfigService, useValue: mockModelConfigService },
+              { provide: LocalVectorService, useValue: mockLocalVectorService },
+            ],
+          }).compile();
+        const localService = module.get<LlmService>(LlmService);
+
+        mockOpenAIEmbeddings.mockResolvedValue({
+            data: [{ embedding: [0.1, 0.1, 0.1] }]
+        });
+
+        const result = await localService.getEmbedding('test');
+        expect(result).toEqual([0.1, 0.1, 0.1]);
+        expect(mockLocalVectorService.getEmbedding).toHaveBeenCalled();
+        expect(mockOpenAIEmbeddings).toHaveBeenCalled();
+    });
+
+    it('should use OpenAI for embeddings even when LLM_TYPE is Anthropic, if OpenAI key is provided (and Local fails/mocked)', async () => {
+      // Force Local to fail
+      mockLocalVectorService.getEmbedding.mockRejectedValue(new Error('Local not available'));
+
+      // 1. Setup Config for Anthropic Mode but with OpenAI Key
+      mockConfigService.get.mockImplementation((key) => {
+        if (key === 'LLM_TYPE') return 'Anthropic';
+        return null;
+      });
+      
+      // Update mockModelConfigService properties
+      (mockModelConfigService as any).openaiApiKey = 'sk-openai-test';
+      (mockModelConfigService as any).authToken = 'sk-ant-test'; // Anthropic Token
+
+      // 2. Re-init Service
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          LlmService,
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: CACHE_MANAGER, useValue: mockCacheManager },
+          { provide: PrismaService, useValue: mockPrismaService },
+          { provide: ModelConfigService, useValue: mockModelConfigService },
+          { provide: LocalVectorService, useValue: mockLocalVectorService },
+        ],
+      }).compile();
+      const localService = module.get<LlmService>(LlmService);
+
+      // 3. Mock OpenAI Response
+      mockOpenAIEmbeddings.mockResolvedValue({
+        data: [{ embedding: [0.1, 0.2, 0.3] }]
+      });
+
+      // 4. Call getEmbedding
+      const embedding = await localService.getEmbedding('test text');
+
+      // 5. Verify
+      expect(embedding).toEqual([0.1, 0.2, 0.3]);
+      expect(mockOpenAIEmbeddings).toHaveBeenCalledWith({
+        model: 'text-embedding-mock',
+        input: 'test text',
+      });
+    });
+
+    it('should return random vector fallback if no OpenAI client and Local fails', async () => {
+      mockLocalVectorService.getEmbedding.mockRejectedValue(new Error('Local not available'));
+      // 1. Setup Config for Anthropic Mode WITHOUT OpenAI Key
+      mockConfigService.get.mockImplementation((key) => {
+        if (key === 'LLM_TYPE') return 'Anthropic';
+        return null;
+      });
+      
+      (mockModelConfigService as any).openaiApiKey = undefined;
+      (mockModelConfigService as any).authToken = 'sk-ant-test';
+
+      // 2. Re-init Service
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          LlmService,
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: CACHE_MANAGER, useValue: mockCacheManager },
+          { provide: PrismaService, useValue: mockPrismaService },
+          { provide: ModelConfigService, useValue: mockModelConfigService },
+          { provide: LocalVectorService, useValue: mockLocalVectorService },
+        ],
+      }).compile();
+      const localService = module.get<LlmService>(LlmService);
+
+      // 3. Call getEmbedding
+      const embedding = await localService.getEmbedding('test text');
+
+      // 4. Verify (Fallback is random array of length 1536)
+      expect(embedding).toHaveLength(1536);
+      expect(mockOpenAIEmbeddings).not.toHaveBeenCalled(); // Should clear mocks before this test if reusing
     });
   });
 });

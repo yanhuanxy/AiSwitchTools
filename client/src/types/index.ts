@@ -76,3 +76,24 @@ export type ApiError = {
   message: string
   traceId?: string
 }
+
+export type AgentState = "IDLE" | "THINKING" | "EXECUTING" | "AWAITING_INPUT";
+
+export type ThoughtLog = {
+  text: string;
+  timestamp: number;
+};
+
+export type ToolCall = {
+  tool: string;
+  name: string;
+  input?: any;
+  timestamp: number;
+};
+
+export type ToolResult = {
+  tool: string;
+  status: "success" | "error";
+  output: any;
+  timestamp: number;
+};

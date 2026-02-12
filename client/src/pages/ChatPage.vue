@@ -10,11 +10,32 @@
          <button @click="handleShare" class="text-gray-500 hover:text-primary transition-colors p-1.5 rounded-md hover:bg-gray-100" title="分享">
            <span class="text-lg">↗</span>
          </button>
-         <button class="text-gray-500 hover:text-primary transition-colors p-1.5 rounded-md hover:bg-gray-100" title="更多">
-           <span class="text-lg">···</span>
-         </button>
+         
+         <el-dropdown trigger="click">
+           <button class="text-gray-500 hover:text-primary transition-colors p-1.5 rounded-md hover:bg-gray-100" title="更多">
+             <span class="text-lg">···</span>
+           </button>
+           <template #dropdown>
+             <el-dropdown-menu>
+               <el-dropdown-item @click="goToWorkflows">
+                 <span class="mr-2">⚡</span> 工作流管理
+               </el-dropdown-item>
+               <el-dropdown-item @click="toggleDebugLogs">
+                 <span class="mr-2">{{ showDebugLogs ? '🙈' : '👁️' }}</span> {{ showDebugLogs ? '隐藏调试日志' : '显示调试日志' }}
+               </el-dropdown-item>
+             </el-dropdown-menu>
+           </template>
+         </el-dropdown>
       </div>
     </header>
+
+    <!-- Agent State Indicator -->
+    <div v-if="agentState && agentState !== 'IDLE'" class="bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center gap-2 text-xs text-blue-700">
+      <span class="animate-spin" v-if="agentState === 'EXECUTING' || agentState === 'THINKING'">⏳</span>
+      <span v-if="agentState === 'THINKING'">正在思考用户意图...</span>
+      <span v-else-if="agentState === 'EXECUTING'">正在执行工作流...</span>
+      <span v-else-if="agentState === 'AWAITING_INPUT'">等待用户输入...</span>
+    </div>
 
     <!-- Share Dialog -->
     <el-dialog
@@ -98,7 +119,7 @@
         </div>
 
         <!-- Messages -->
-        <MessageList :messages="messages" />
+        <MessageList :messages="messages" :show-debug-logs="showDebugLogs" />
       </div>
     </div>
 
@@ -135,15 +156,26 @@ import CButton from "../components/common/CButton.vue"
 import { useConversationStore } from "../stores/conversations"
 import { useChatStore } from "../stores/chat"
 import { useAuthStore } from "../stores/auth"
-import { createChatTask, cancelChatTask, retryAssistantMessage, continueAssistantMessage } from "../services/chat"
+import { createChatTask, createChatCompletion, cancelChatTask, retryAssistantMessage, continueAssistantMessage } from "../services/chat"
 import { createSseConnection } from "../services/sse"
 import { getErrorMessage, handleError, notifyError, reportError } from "../services/error"
 import { ElMessage } from "element-plus"
+import { useRouter } from "vue-router"
 
+const router = useRouter()
 const showShareDialog = ref(false)
+const showDebugLogs = ref(false)
 
 const handleShare = () => {
   showShareDialog.value = true
+}
+
+const goToWorkflows = () => {
+  router.push('/workflows')
+}
+
+const toggleDebugLogs = () => {
+  showDebugLogs.value = !showDebugLogs.value
 }
 
 const shareLink = async () => {
@@ -189,6 +221,7 @@ const loadingMore = ref(false)
 
 const messages = computed(() => chatStore.messagesByConversationId[conversationId.value] || [])
 const activeTask = computed(() => chatStore.activeTaskByConversationId[conversationId.value] || null)
+const agentState = computed(() => chatStore.agentStateByConversationId[conversationId.value] || 'IDLE')
 const sendDisabled = computed(() => sending.value || !isOnline.value)
 const statusText = computed(() => !isOnline.value ? '网络已断开' : null)
 
@@ -261,13 +294,30 @@ const handleSend = async (content: string, attachmentIds: string[] = []) => {
      chatStore.appendMessage(conversationId.value, tempMsg)
      scrollToBottom()
 
-     // 2. Create Chat Task
-     const { taskId, userMessageId, assistantMessageId } = await createChatTask({
-       conversationId: conversationId.value,
-       clientMessageId: clientMsgId,
-       content,
-       attachmentIds
-     })
+     // 2. Create Chat Task (V2 if Agent Mode, else V1)
+     let taskId, userMessageId, assistantMessageId
+     
+     if (chatStore.isAgentMode) {
+       const res = await createChatCompletion({
+         conversationId: conversationId.value,
+         clientMessageId: clientMsgId,
+         content,
+         attachmentIds
+       })
+       taskId = res.taskId
+       userMessageId = res.userMessageId
+       assistantMessageId = res.assistantMessageId
+     } else {
+       const res = await createChatTask({
+         conversationId: conversationId.value,
+         clientMessageId: clientMsgId,
+         content,
+         attachmentIds
+       })
+       taskId = res.taskId
+       userMessageId = res.userMessageId
+       assistantMessageId = res.assistantMessageId
+     }
      
      // 3. Update local state with real IDs
      // Update user message ID
@@ -398,12 +448,33 @@ const connectSse = (taskId: string, assistantMessageId: string) => {
     handlers: {
       onOpen: () => {
         console.log("SSE Connected")
+        chatStore.setAgentState(conversationId.value, 'THINKING')
       },
       onMeta: (data) => {
         console.log("SSE Meta:", data)
       },
+      onThought: (data) => {
+        if (data && data.text) {
+          chatStore.addTraceLog(assistantMessageId, { text: data.text, timestamp: Date.now() })
+        }
+      },
+      onToolUse: (data) => {
+        if (data) {
+          chatStore.setAgentState(conversationId.value, 'EXECUTING')
+          chatStore.addTraceLog(assistantMessageId, { 
+            tool: 'workflow', 
+            name: data.name || 'Unknown Tool', 
+            input: data.input, 
+            timestamp: Date.now() 
+          })
+        }
+      },
+      onToolResult: (data) => {
+         // Optional: Update trace log with result
+      },
       onDelta: (data) => {
         if (data && data.text) {
+          chatStore.setAgentState(conversationId.value, 'IDLE') // Once generating text, we are back to IDLE or GENERATING
           chatStore.appendStream(assistantMessageId, data.text)
           startTypewriter(assistantMessageId)
         }
@@ -411,6 +482,7 @@ const connectSse = (taskId: string, assistantMessageId: string) => {
       onDone: (data) => {
         console.log("SSE Done")
         chatStore.setActiveTask(conversationId.value, null)
+        chatStore.setAgentState(conversationId.value, 'IDLE')
         
         // If typewriter is not running (already caught up), finish immediately
         if (!activeTypewriters.has(assistantMessageId)) {

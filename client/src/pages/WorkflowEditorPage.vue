@@ -244,8 +244,7 @@ onMounted(async () => {
     // Fallback if backend fails
     if (isMounted.value) {
         llmModels.value = [
-          { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'openai' },
-          { id: 'gpt-4', name: 'GPT-4', provider: 'openai' }
+          { id: '默认', name: '无模型', provider: 'openai' }
         ]
     }
   }

@@ -1,0 +1,29 @@
+
+groups:
+  - name: AiSwitchAlerts
+    rules:
+      - alert: HighSSEDisconnectRate
+        expr: rate(sse_disconnects_total{reason="error"}[5m]) / rate(sse_connections_opened_total[5m]) > 0.01
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High SSE abnormal disconnect rate (> 1%)"
+          description: "More than 1% of SSE connections are dropping unexpectedly."
+
+      - alert: HighMessageLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{handler="/chat/completion"}[5m])) > 1.0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Message Latency P99 > 1s"
+          description: "P99 latency for chat completion is exceeding 1 second."
+
+      - alert: CircuitBreakerOpen
+        expr: changes(circuit_breaker_state{state="OPEN"}[1m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit Breaker Open"
+          description: "The workflow engine circuit breaker has opened due to high failure rate."

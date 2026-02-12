@@ -1,15 +1,51 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ObservabilityRepository } from './observability.repository';
 import { ObservabilityProvider } from './observability.provider';
+import * as client from 'prom-client';
 
 @Injectable()
 export class ObservabilityService {
   private readonly logger = new Logger(ObservabilityService.name);
+  private readonly register: client.Registry;
+
+  // Prometheus Metrics
+  public readonly intentAccuracy: client.Counter;
+  public readonly planningSuccessRate: client.Counter;
+  public readonly e2eLatency: client.Histogram;
 
   constructor(
     @Inject(ObservabilityRepository) private readonly observabilityRepository: ObservabilityRepository,
     @Inject(ObservabilityProvider) private readonly observabilityProvider: ObservabilityProvider,
-  ) {}
+  ) {
+    this.register = new client.Registry();
+    // Add default metrics
+    client.collectDefaultMetrics({ register: this.register });
+
+    this.intentAccuracy = new client.Counter({
+      name: 'agent_intent_accuracy_total',
+      help: 'Total count of intent recognition results',
+      labelNames: ['status'], // 'success', 'fail'
+      registers: [this.register],
+    });
+
+    this.planningSuccessRate = new client.Counter({
+      name: 'agent_planning_success_total',
+      help: 'Total count of planning results',
+      labelNames: ['status'], // 'success', 'fail'
+      registers: [this.register],
+    });
+
+    this.e2eLatency = new client.Histogram({
+      name: 'agent_e2e_latency_seconds',
+      help: 'End-to-end latency in seconds',
+      buckets: [0.1, 0.2, 0.5, 0.8, 1, 2, 5], // 0.8s is the P99 target
+      registers: [this.register],
+    });
+  }
+
+  async getPrometheusMetrics() {
+    return this.register.metrics();
+  }
 
   resolveTraceId(value: unknown) {
     return this.observabilityProvider.resolveTraceId(value);

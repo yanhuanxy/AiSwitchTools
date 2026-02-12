@@ -5,4 +5,5 @@
 /client/node_modules/
 /service/dist/
 /service/node_modules/
-/service/**
+/service/uploads/**
+/service/models/**

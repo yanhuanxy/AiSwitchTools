@@ -1,17 +1,40 @@
 import { defineStore } from "pinia"
-import type { Message, GenerationTask } from "../types"
+import type { Message, GenerationTask, AgentState, ThoughtLog, ToolCall } from "../types"
 
 export const useChatStore = defineStore("chat", {
   state: () => ({
     messagesByConversationId: {} as Record<string, Message[]>,
     activeTaskByConversationId: {} as Record<string, GenerationTask | null>,
-    streamTextByAssistantMessageId: {} as Record<string, string>
+    streamTextByAssistantMessageId: {} as Record<string, string>,
+    agentStateByConversationId: {} as Record<string, AgentState>,
+    traceLogsByAssistantMessageId: {} as Record<string, (ThoughtLog | ToolCall)[]>,
+    isAgentMode: localStorage.getItem('ai-switch-agent-mode') === 'true'
   }),
   actions: {
+    toggleAgentMode() {
+      this.isAgentMode = !this.isAgentMode
+      localStorage.setItem('ai-switch-agent-mode', String(this.isAgentMode))
+    },
+    setAgentMode(enabled: boolean) {
+      this.isAgentMode = enabled
+      localStorage.setItem('ai-switch-agent-mode', String(enabled))
+    },
     initConversation(conversationId: string) {
       if (!this.messagesByConversationId[conversationId]) {
         this.messagesByConversationId[conversationId] = []
       }
+      if (!this.agentStateByConversationId[conversationId]) {
+        this.agentStateByConversationId[conversationId] = "IDLE"
+      }
+    },
+    setAgentState(conversationId: string, state: AgentState) {
+        this.agentStateByConversationId[conversationId] = state
+    },
+    addTraceLog(assistantMessageId: string, log: ThoughtLog | ToolCall) {
+        if (!this.traceLogsByAssistantMessageId[assistantMessageId]) {
+            this.traceLogsByAssistantMessageId[assistantMessageId] = []
+        }
+        this.traceLogsByAssistantMessageId[assistantMessageId].push(log)
     },
     setActiveTask(conversationId: string, task: GenerationTask | null) {
       this.activeTaskByConversationId[conversationId] = task

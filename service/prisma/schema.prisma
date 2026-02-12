@@ -135,6 +135,7 @@ model WorkflowVersion {
   version     Int
   versionTag  String
   graphData   String
+  inputSchema String?
   publishedAt DateTime @default(now())
   publishedBy String
   workflow    Workflow @relation(fields: [workflowId], references: [id])

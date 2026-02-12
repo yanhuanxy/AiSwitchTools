@@ -1,10 +1,10 @@
 import { Injectable, NotFoundException, ConflictException, Logger, Inject, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { SummariesRepository } from './summaries.repository';
 import { SummariesProvider } from './summaries.provider';
 import { CreateSummaryDto, UpdateSummaryDto } from './dto';
 import { SummaryEntity, SummaryWithConversation } from './entities';
 import { ulid } from 'ulid';
+import { ModelConfigService } from '../llm/model-config.service';
 
 export interface SummaryResponse {
   summaryId: string;
@@ -50,13 +50,13 @@ export class SummariesService {
   constructor(
     @Inject(SummariesRepository) private readonly summariesRepository: SummariesRepository,
     @Inject(SummariesProvider) private readonly summariesProvider: SummariesProvider,
-    @Optional() @Inject(ConfigService) private readonly configService?: ConfigService,
+    @Inject(ModelConfigService) private readonly modelConfigService: ModelConfigService,
   ) {
-    this.minMessageCount = this.configService?.get('SUMMARY_MIN_MESSAGES', 10) ?? 10;
-    this.minTokenCount = this.configService?.get('SUMMARY_MIN_TOKENS', 4000) ?? 4000;
-    this.maxSummaryTokens = this.configService?.get('SUMMARY_MAX_TOKENS', 200) ?? 200;
-    this.summaryStaleHours = this.configService?.get('SUMMARY_STALE_HOURS', 24) ?? 24;
-    this.enableAutoGeneration = this.configService?.get('SUMMARY_AUTO_GENERATION', true) ?? true;
+    this.minMessageCount = this.modelConfigService.summaryMinMessages;
+    this.minTokenCount = this.modelConfigService.summaryMinTokens;
+    this.maxSummaryTokens = this.modelConfigService.summaryMaxTokens;
+    this.summaryStaleHours = this.modelConfigService.summaryStaleHours;
+    this.enableAutoGeneration = this.modelConfigService.summaryAutoGeneration;
   }
 
   /**
@@ -511,7 +511,7 @@ export class SummariesService {
       maxSummaryTokens: this.maxSummaryTokens,
       summaryStaleHours: this.summaryStaleHours,
       enableAutoGeneration: this.enableAutoGeneration,
-      model: this.configService?.get('SUMMARY_MODEL', 'gpt-3.5-turbo') ?? 'gpt-3.5-turbo',
+      model: this.modelConfigService.summaryModel,
     };
   }
 

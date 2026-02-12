@@ -3,6 +3,7 @@ import { WorkflowEngineService } from './workflow-engine.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { RagService } from '../rag/rag.service';
+import { ModelConfigService } from '../llm/model-config.service';
 
 describe('WorkflowEngineService', () => {
   let service: WorkflowEngineService;
@@ -24,6 +25,13 @@ describe('WorkflowEngineService', () => {
     retrieve: jest.fn(),
   };
 
+  const mockModelConfigService = {
+    embeddingModel: 'text-embedding-mock',
+    defaultChatModel: 'gpt-mock',
+    semanticAnalysisModel: 'gpt-mock',
+    fallbackModel: 'gpt-mock',
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     
@@ -33,6 +41,7 @@ describe('WorkflowEngineService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: LlmService, useValue: mockLlmService },
         { provide: RagService, useValue: mockRagService },
+        { provide: ModelConfigService, useValue: mockModelConfigService },
       ],
     }).compile();
 
@@ -100,7 +109,7 @@ describe('WorkflowEngineService', () => {
       // Verify Semantic Analysis
       expect(mockLlmService.chatCompletion).toHaveBeenNthCalledWith(1, 
         expect.arrayContaining([{ role: 'user', content: expect.stringContaining('Analyze the following query') }]), 
-        expect.anything()
+        expect.objectContaining({ model: 'gpt-mock' })
       );
 
       // Verify RAG
@@ -109,7 +118,7 @@ describe('WorkflowEngineService', () => {
       // Verify LLM Prompt Construction
       expect(mockLlmService.chatCompletion).toHaveBeenNthCalledWith(2,
         expect.arrayContaining([{ role: 'user', content: expect.stringContaining('Doc Content 1') }]),
-        expect.anything()
+        expect.objectContaining({ model: 'gpt-mock' })
       );
     });
 

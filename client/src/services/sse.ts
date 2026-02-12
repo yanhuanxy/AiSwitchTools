@@ -1,6 +1,9 @@
 type SseHandlers = {
   onMeta?: (data: any) => void
   onDelta?: (data: any) => void
+  onThought?: (data: any) => void
+  onToolUse?: (data: any) => void
+  onToolResult?: (data: any) => void
   onDone?: (data: any) => void
   onError?: (data: any) => void
   onOpen?: () => void
@@ -59,6 +62,24 @@ export const createSseConnection = (options: {
       const data = JSON.parse(message.data)
       lastEventId = message.lastEventId || data?.eventId || data?.lastEventId || lastEventId
       handlers.onDelta?.(data)
+    })
+    source.addEventListener("thought", (event) => {
+      const message = event as MessageEvent
+      const data = JSON.parse(message.data)
+      lastEventId = message.lastEventId || data?.eventId || data?.lastEventId || lastEventId
+      handlers.onThought?.(data)
+    })
+    source.addEventListener("tool_use", (event) => {
+      const message = event as MessageEvent
+      const data = JSON.parse(message.data)
+      lastEventId = message.lastEventId || data?.eventId || data?.lastEventId || lastEventId
+      handlers.onToolUse?.(data)
+    })
+    source.addEventListener("tool_result", (event) => {
+      const message = event as MessageEvent
+      const data = JSON.parse(message.data)
+      lastEventId = message.lastEventId || data?.eventId || data?.lastEventId || lastEventId
+      handlers.onToolResult?.(data)
     })
     source.addEventListener("done", (event) => {
       const message = event as MessageEvent

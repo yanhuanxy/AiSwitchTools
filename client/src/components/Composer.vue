@@ -9,7 +9,9 @@
     <div 
       class="relative bg-white border rounded-xl shadow-sm transition-all duration-200 flex flex-col"
       :class="[
-        isDragging ? 'border-dashed border-primary border-2' : 'border-gray-border hover:border-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary'
+        isDragging ? 'border-dashed border-primary border-2' : '',
+        isAgentMode && !isDragging ? 'border-blue-300 ring-1 ring-blue-100' : 'border-gray-border',
+        !isAgentMode && !isDragging ? 'hover:border-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary' : ''
       ]"
     >
       <!-- Image Uploader (Thumbnails) -->
@@ -21,10 +23,11 @@
       </div>
 
       <textarea
+        ref="textareaRef"
         v-model="content"
         rows="3"
         class="w-full resize-none bg-transparent border-none outline-none p-3 text-sm text-gray-900 placeholder-gray-400"
-        placeholder="发送消息..."
+        :placeholder="isAgentMode ? '输入目标，Agent将自动规划任务...' : '发送消息...'"
         @keydown.enter.prevent="handleEnter"
       ></textarea>
       
@@ -36,6 +39,17 @@
             @click="triggerUpload"
           >
              📎
+          </button>
+          
+          <!-- Agent Mode Toggle -->
+          <button 
+            class="p-1.5 rounded transition-all duration-200 flex items-center justify-center w-8 h-8"
+            :class="isAgentMode ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-400'"
+            :title="isAgentMode ? 'Agent模式已开启' : '切换到Agent模式'"
+            @click="toggleAgentMode"
+            aria-label="Toggle Agent Mode"
+          >
+             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bot"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
           </button>
         </div>
         <div class="flex items-center gap-2">
@@ -71,9 +85,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue"
+import { ref, computed, onMounted, onBeforeUnmount } from "vue"
 import ChatImageUploader from "./ChatImageUploader/index.vue"
 import type { UploadFile } from "../types/upload"
+import { useChatStore } from "../stores/chat"
+import { ElMessage } from "element-plus"
 
 const emit = defineEmits<{ 
   (e: "send", value: string, attachmentIds: string[]): void 
@@ -85,10 +101,25 @@ const props = defineProps<{
   canStop?: boolean
 }>()
 
+const chatStore = useChatStore()
 const content = ref("")
 const isDragging = ref(false)
 const uploaderRef = ref<InstanceType<typeof ChatImageUploader> | null>(null)
 const files = ref<UploadFile[]>([])
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+const isAgentMode = computed(() => chatStore.isAgentMode)
+
+const toggleAgentMode = () => {
+  chatStore.toggleAgentMode()
+  if (chatStore.isAgentMode) {
+    ElMessage.success("Agent模式已开启")
+  } else {
+    ElMessage.info("已切换回普通对话")
+  }
+  // Focus input
+  textareaRef.value?.focus()
+}
 
 const uploadedFiles = computed(() => 
   files.value.filter(f => f.status === 'success' && f.id)
@@ -99,8 +130,24 @@ const handleFilesUpdate = (updatedFiles: UploadFile[]) => {
 }
 
 const triggerUpload = () => {
-  uploaderRef.value?.triggerUpload()
+  uploaderRef.value?.trigger()
 }
+
+// Keyboard shortcuts
+const handleKeydown = (e: KeyboardEvent) => {
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'a') {
+    e.preventDefault()
+    toggleAgentMode()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 const handleDragOver = (e: DragEvent) => {
   isDragging.value = true

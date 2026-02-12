@@ -5,6 +5,7 @@ import { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { ModelConfigService } from './model-config.service';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -29,6 +30,9 @@ export interface ModelInfo {
   enabled: boolean;
 }
 
+// Use type-only import for LocalVectorService if possible, or ensure it is mocked in tests
+import { LocalVectorService } from './local-vector.service';
+
 @Injectable()
 export class LlmService {
   private openai: OpenAI | null = null;
@@ -40,31 +44,28 @@ export class LlmService {
     @Inject(ConfigService) private readonly configService: ConfigService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @Inject(PrismaService) private prisma: PrismaService,
+    @Inject(ModelConfigService) private readonly modelConfigService: ModelConfigService,
+    @Inject(LocalVectorService) private readonly localVectorService: LocalVectorService,
   ) {
     this.initClients();
   }
 
   private initClients() {
-    // OpenAI Init
-    const openAiKey = this.configService.get('OPENAI_API_KEY');
-    const openAiBase = this.configService.get('OPENAI_BASE_URL');
-    if (openAiKey) {
-      this.openai = new OpenAI({
-        apiKey: openAiKey,
-        baseURL: openAiBase || undefined,
-      });
-      this.logger.log('OpenAI client initialized');
-    }
-
+    // OpenAI Init - Always attempt to initialize for Embeddings or fallback
     // Anthropic Init
-    const anthropicKey = this.configService.get('ANTHROPIC_AUTH_TOKEN');
-    const anthropicBase = this.configService.get('ANTHROPIC_BASE_URL');
-    if (anthropicKey) {
-      this.anthropic = new Anthropic({
-        apiKey: anthropicKey,
-        baseURL: anthropicBase || undefined,
-      });
-      this.logger.log('Anthropic client initialized');
+    const llmType = this.modelConfigService.llmType;
+    if(llmType == "openAi"){
+        this.openai = new OpenAI({
+            apiKey: this.modelConfigService.authToken,
+            baseURL: this.modelConfigService.baseUrl,
+        });
+        this.logger.log('OpenAI client initialized');
+    }else if(llmType === 'Anthropic'){
+        this.anthropic = new Anthropic({
+            apiKey: this.modelConfigService.authToken,
+            baseURL: this.modelConfigService.baseUrl,
+        });
+        this.logger.log('Anthropic client initialized');
     }
 
     if (!this.openai && !this.anthropic) {
@@ -133,15 +134,15 @@ export class LlmService {
       }
     }
 
-    // 4. Default Fallback (Hardcoded if nothing else)
+    // 4. Default Fallback (Configured defaults)
     if (modelsMap.size === 0) {
        // Check if we have clients and add basic ones
+       const defaultChatModel = this.modelConfigService.defaultChatModel;
        if (this.openai) {
-         modelsMap.set('openai:gpt-3.5-turbo', { provider: 'openai', modelName: 'gpt-3.5-turbo', displayName: 'GPT-3.5 Turbo', enabled: true });
-         modelsMap.set('openai:gpt-4', { provider: 'openai', modelName: 'gpt-4', displayName: 'GPT-4', enabled: true });
+         modelsMap.set(`openai:${defaultChatModel}`, { provider: 'openai', modelName: defaultChatModel, displayName: 'Default Chat Model', enabled: true });
        }
        if (this.anthropic) {
-         modelsMap.set('anthropic:claude-3-opus-20240229', { provider: 'anthropic', modelName: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus', enabled: true });
+         modelsMap.set(`anthropic:${defaultChatModel}`, { provider: 'anthropic', modelName: defaultChatModel, displayName: 'Default Anthropic Model', enabled: true });
        }
     }
 
@@ -161,6 +162,7 @@ export class LlmService {
   }
 
   async reloadCache() {
+    this.modelConfigService.reload(); // Also reload config
     await this.cacheManager.del(this.CACHE_KEY);
     return this.getAvailableModels();
   }
@@ -168,11 +170,21 @@ export class LlmService {
   // ... keep other methods ...
 
   async getEmbedding(text: string): Promise<number[]> {
-    // 1. Try OpenAI
+    // 1. Try Local Vector Service (Priority)
+    // You can control this via config if you want to toggle it, but here we try it first if configured
+    try {
+        // Simple check if we should prefer local - or just try it.
+        // For robustness, we can try local first, then fallback to OpenAI, then Mock.
+        return await this.localVectorService.getEmbedding(text);
+    } catch (localErr) {
+        this.logger.warn(`Local embedding failed, falling back to OpenAI: ${localErr}`);
+    }
+
+    // 2. Try OpenAI
     if (this.openai) {
       try {
         const response = await this.openai.embeddings.create({
-          model: 'text-embedding-ada-002', // Or 'text-embedding-3-small'
+          model: this.modelConfigService.embeddingModel, 
           input: text,
         });
         return response.data[0].embedding;
@@ -180,10 +192,33 @@ export class LlmService {
         this.logger.error('OpenAI Embedding failed', err);
       }
     }
+    throw new Error('Embedding failed');
+  }
 
-    // 2. Mock Fallback (random vector of dim 1536)
-    this.logger.warn('Using Mock Embedding');
-    return Array.from({ length: 1536 }, () => Math.random());
+  async getEmbeddings(texts: string[]): Promise<number[][]> {
+      // 1. Try Local Vector Service
+      try {
+          return await this.localVectorService.getEmbeddings(texts);
+      } catch (localErr) {
+          this.logger.warn(`Local batch embedding failed, falling back to OpenAI: ${localErr}`);
+      }
+
+      // 2. Try OpenAI
+      if (this.openai) {
+          try {
+              const response = await this.openai.embeddings.create({
+                  model: this.modelConfigService.embeddingModel,
+                  input: texts,
+              });
+              return response.data.map(d => d.embedding);
+          } catch (err) {
+              this.logger.error('OpenAI Batch Embedding failed', err);
+          }
+      }
+
+      // 3. Mock Fallback
+      this.logger.warn('Using Mock Batch Embedding');
+      return texts.map(() => Array.from({ length: 1536 }, () => Math.random()));
   }
 
   async chatCompletion(
@@ -191,7 +226,7 @@ export class LlmService {
     options: ChatOptions = {},
   ): Promise<string> {
     try {
-      let model = options.model || this.configService.get('CHAT_DEFAULT_MODEL') || this.configService.get('ANTHROPIC_MODEL') || 'gpt-3.5-turbo';
+      let model = options.model || this.modelConfigService.defaultChatModel;
       
       if (this.shouldUseAnthropic(model)) {
          return this.chatCompletionAnthropic(messages, model, options);
@@ -296,7 +331,7 @@ export class LlmService {
     options: ChatOptions = {},
   ): Promise<AsyncIterable<UnifiedChunk>> {
     try {
-      let model = options.model || this.configService.get('CHAT_DEFAULT_MODEL') || this.configService.get('ANTHROPIC_MODEL') || 'gpt-3.5-turbo';
+      let model = options.model || this.modelConfigService.defaultChatModel;
 
       if (this.shouldUseAnthropic(model)) {
         return this.chatStreamAnthropic(messages, model, options);

@@ -40,6 +40,19 @@
         <div v-else-if="message.status === 'failed'" class="mt-2 text-xs text-danger">
            ⚠️ 生成失败
         </div>
+
+        <!-- Debug Logs / Thought Chain -->
+        <div v-if="showDebugLogs && traceLogs && traceLogs.length > 0" class="mt-3 pt-3 border-t border-gray-100 space-y-2">
+          <div v-for="(log, idx) in traceLogs" :key="idx" class="text-xs font-mono p-2 bg-gray-50 rounded text-gray-600">
+             <div v-if="'text' in log">
+               <span class="text-blue-500">Thinking:</span> {{ log.text }}
+             </div>
+             <div v-else>
+               <span class="text-purple-500">Tool Use:</span> {{ log.name }}
+               <pre class="mt-1 text-gray-500 overflow-x-auto">{{ JSON.stringify(log.input, null, 2) }}</pre>
+             </div>
+          </div>
+        </div>
       </div>
       
       <!-- Actions (Copy, Regenerate, etc.) -->
@@ -67,10 +80,17 @@
 import type { Message } from "../types"
 import { computed, ref } from "vue"
 import { ElMessage } from "element-plus"
+import { useChatStore } from "../stores/chat"
 
-const props = defineProps<{ message: Message }>()
+const props = defineProps<{ message: Message, showDebugLogs?: boolean }>()
 const isUser = computed(() => props.message.role === "user")
 const copied = ref(false)
+
+const chatStore = useChatStore()
+const traceLogs = computed(() => {
+  if (isUser.value) return []
+  return chatStore.traceLogsByAssistantMessageId[props.message.id] || []
+})
 
 const formatTime = (iso: string) => {
   if (!iso) return ''

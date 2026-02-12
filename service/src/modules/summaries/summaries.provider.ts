@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
+import { ModelConfigService } from '../llm/model-config.service';
 
 export interface SummaryGenerationOptions {
   conversationId: string;
@@ -38,15 +38,15 @@ export class SummariesProvider {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(LlmService) private readonly llmService: LlmService,
-    private readonly configService?: ConfigService,
+    @Inject(ModelConfigService) private readonly modelConfigService: ModelConfigService
   ) {
-    this.maxSummaryTokens = this.configService?.get('SUMMARY_MAX_TOKENS', 200) ?? 200;
-    this.summaryModel = this.configService?.get('SUMMARY_MODEL', 'gpt-3.5-turbo') ?? 'gpt-3.5-turbo';
+    this.maxSummaryTokens = this.modelConfigService.summaryMaxTokens;
+    this.summaryModel = this.modelConfigService.summaryModel;
     this.privacyFilter = {
       phoneNumbers: true,
       idCards: true,
       bankCards: true,
-      customPatterns: this.configService?.get('SUMMARY_CUSTOM_PATTERNS', []) ?? [],
+      customPatterns: this.modelConfigService.summaryCustomPatterns,
     };
   }
 

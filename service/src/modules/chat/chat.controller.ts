@@ -34,6 +34,20 @@ export class ChatController {
     };
   }
 
+  @Post('completion')
+  @HttpCode(HttpStatus.CREATED)
+  async createCompletion(@Body(ValidationPipe) dto: CreateChatTaskDto, @Req() req: Request) {
+    const ownerUserId = (req as any).user.id;
+    const result = await this.chatService.createTaskV2(ownerUserId, dto);
+    const traceId = req.headers['x-trace-id'] as string;
+    return {
+      userMessageId: result.userMessageId,
+      assistantMessageId: result.assistantMessageId,
+      taskId: result.taskId,
+      traceId,
+    };
+  }
+
   @Post('messages/:assistantMessageId/retry')
   @HttpCode(HttpStatus.CREATED)
   async retry(@Param('assistantMessageId') assistantMessageId: string, @Req() req: Request) {
